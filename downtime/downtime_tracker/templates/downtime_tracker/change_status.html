@@ -1,0 +1,25 @@
+{% extends "downtime_tracker/base.html" %}
+{% block title %}Change Status — {{ equipment.asset_number }}{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">Change Status</h2>
+    <div><strong>{{ equipment.asset_number }}</strong> — {{ equipment.description }}</div>
+    <div class="muted">Department: {{ equipment.department.name }}</div>
+    <div style="height:10px;"></div>
+
+    <form method="post">
+      {% csrf_token %}
+
+      <label for="id_new_status">New status</label>
+      {{ form.new_status }}
+
+      <label for="id_comment">Comment (required)</label>
+      {{ form.comment }}
+
+      <div style="height:12px;"></div>
+      <button class="btn btn-primary" type="submit">Submit</button>
+      <a class="btn" href="{% url 'downtime_tracker:department_detail' equipment.department.code %}">Cancel</a>
+    </form>
+  </div>
+{% endblock %}
