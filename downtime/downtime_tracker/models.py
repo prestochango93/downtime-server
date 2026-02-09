@@ -1,9 +1,5 @@
 from django.db import models
-
-# Create your models here.
-# downtime_tracker/models.py
 from __future__ import annotations
-
 from datetime import timedelta
 from django.conf import settings
 from django.core.exceptions import ValidationError
