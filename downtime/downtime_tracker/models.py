@@ -228,7 +228,7 @@ class DowntimeEvent(models.Model):
         return timedelta(0)
 
         end = self.ended_at or timezone.now()
-    return end - self.started_at
+        return end - self.started_at
 
     @property
     def duration_days(self) -> float:
