@@ -1,4 +1,3 @@
-from django.db import models
 from __future__ import annotations
 from datetime import timedelta
 from django.conf import settings
