@@ -224,10 +224,10 @@ class DowntimeEvent(models.Model):
 
     @property
     def duration(self) -> timedelta:
-    if not self.started_at:
+        if not self.started_at:
         return timedelta(0)
 
-    end = self.ended_at or timezone.now()
+        end = self.ended_at or timezone.now()
     return end - self.started_at
 
     @property
