@@ -1,0 +1,48 @@
+{% extends "downtime_tracker/base.html" %}
+{% block title %}{{ department.name }} — Downtime Tracker{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h2 style="margin-top:0;">{{ department.name }}</h2>
+    {% if department.description %}<div class="muted">{{ department.description }}</div>{% endif %}
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <div class="card">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Asset #</th>
+          <th>Description</th>
+          <th>Status</th>
+          <th class="right">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in equipment_list %}
+          <tr>
+            <td>{{ e.asset_number }}</td>
+            <td>{{ e.description }}</td>
+            <td>
+              {% if e.status == "UP" %}
+                <span class="status-pill up">UP</span>
+              {% else %}
+                <span class="status-pill down">DOWN</span>
+              {% endif %}
+            </td>
+            <td class="right">
+              {% if perms.downtime_tracker.change_equipment %}
+                <a class="btn" href="{% url 'downtime_tracker:change_status' e.id %}">Change</a>
+              {% else %}
+                <span class="muted">View only</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="4" class="muted">No equipment found for this department.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}
