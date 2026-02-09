@@ -1,9 +1,4 @@
-from django.contrib import admin
-
-# Register your models here.
-# downtime_tracker/admin.py
 from __future__ import annotations
-
 from django.contrib import admin, messages
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
