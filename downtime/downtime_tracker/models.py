@@ -208,17 +208,7 @@ class DowntimeEvent(models.Model):
             models.Index(fields=["equipment", "-started_at"]),
             models.Index(fields=["ended_at"]),
         ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["equipment"],
-                condition=Q(ended_at__isnull=True),
-                name="unique_open_downtime_event_per_equipment",
-            ),
-            models.CheckConstraint(
-                check=Q(ended_at__isnull=True) | Q(ended_at__gt=F("started_at")),
-                name="downtime_end_after_start",
-            ),
-        ]
+        
 
     def __str__(self) -> str:
         if self.ended_at:
