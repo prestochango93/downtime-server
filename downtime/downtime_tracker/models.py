@@ -201,9 +201,9 @@ class DowntimeEvent(models.Model):
             ),
             # Ensure ended_at is after started_at (when ended_at exists)
             models.CheckConstraint(
-                check=Q(ended_at__isnull=True) | Q(ended_at__gt=models.F("started_at")),
-                name="downtime_end_after_start",
-            ),
+    Q(ended_at__isnull=True) | Q(ended_at__gt=models.F("started_at")),
+    name="downtime_end_after_start",
+),
         ]
 
     def __str__(self) -> str:
