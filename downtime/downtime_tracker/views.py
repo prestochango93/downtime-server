@@ -83,7 +83,67 @@ def department_detail(request, code: str):
         },
     )
 
+@login_required
+def equipment_detail(request, pk: int):
+    equipment = get_object_or_404(Equipment.objects.select_related("department"), pk=pk, is_active=True)
 
+    # Year selection (defaults to current year)
+    now_local = timezone.localtime(timezone.now())
+    try:
+        year = int(request.GET.get("year", now_local.year))
+    except ValueError:
+        year = now_local.year
+
+    year_start = make_aware(datetime(year, 1, 1, 0, 0, 0))
+    year_end = make_aware(datetime(year + 1, 1, 1, 0, 0, 0))
+
+    # All events for this equipment (for display)
+    events_all = (
+        DowntimeEvent.objects.filter(equipment=equipment)
+        .order_by("-started_at")
+    )
+
+    # Open event (if currently down)
+    open_event = (
+        DowntimeEvent.objects.filter(equipment=equipment, ended_at__isnull=True)
+        .order_by("-started_at")
+        .first()
+    )
+
+    # Events overlapping the selected year (for totals)
+    events_year = (
+        DowntimeEvent.objects.filter(equipment=equipment)
+        .filter(started_at__lt=year_end)
+        .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=year_start))
+        .order_by("-started_at")
+    )
+
+    now_ts = timezone.now()
+    total_seconds_year = 0.0
+    for ev in events_year:
+        overlap_start = max(ev.started_at, year_start)
+        overlap_end = min(ev.ended_at or now_ts, year_end)
+        if overlap_end > overlap_start:
+            total_seconds_year += (overlap_end - overlap_start).total_seconds()
+
+    total_days_year = round(total_seconds_year / 86400.0, 3)
+
+    # Optional: convenience years list for dropdown
+    years = list(range(now_local.year - 2, now_local.year + 2 + 1))
+
+    return render(
+        request,
+        "downtime_tracker/equipment_detail.html",
+        {
+            "equipment": equipment,
+            "open_event": open_event,
+            "events_all": events_all,
+            "year": year,
+            "years": years,
+            "total_days_year": total_days_year,
+        },
+    )
+    
 @login_required
 @permission_required("downtime_tracker.change_equipment", raise_exception=True)
 def change_status(request, pk: int):
