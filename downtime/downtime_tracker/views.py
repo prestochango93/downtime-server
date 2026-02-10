@@ -1,10 +1,16 @@
+import json
+from datetime import datetime
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.timezone import make_aware
 
 from .forms import EquipmentStatusForm
-from .models import Department, Equipment
+from .models import Department, Equipment, DowntimeEvent
+
 
 
 @login_required
@@ -16,14 +22,53 @@ def home(request):
 @login_required
 def department_detail(request, code: str):
     department = get_object_or_404(Department, code=code, is_active=True)
+
     equipment_list = (
         Equipment.objects.filter(department=department, is_active=True)
         .order_by("asset_number")
     )
+
+    # Year selection (defaults to current year)
+    now_local = timezone.localtime(timezone.now())
+    try:
+        year = int(request.GET.get("year", now_local.year))
+    except ValueError:
+        year = now_local.year
+
+    year_start = make_aware(datetime(year, 1, 1, 0, 0, 0))
+    year_end = make_aware(datetime(year + 1, 1, 1, 0, 0, 0))
+
+    # Events overlapping the year window
+    events = (
+        DowntimeEvent.objects.filter(equipment__department=department, equipment__is_active=True)
+        .filter(started_at__lt=year_end)
+        .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=year_start))
+        .select_related("equipment")
+    )
+
+    totals_seconds = {eq.id: 0.0 for eq in equipment_list}
+    now_ts = timezone.now()
+
+    for ev in events:
+        overlap_start = max(ev.started_at, year_start)
+        overlap_end = min(ev.ended_at or now_ts, year_end)
+        if overlap_end > overlap_start:
+            totals_seconds[ev.equipment_id] += (overlap_end - overlap_start).total_seconds()
+
+    # Build chart arrays (days)
+    chart_labels = [eq.asset_number for eq in equipment_list]
+    chart_values_days = [round(totals_seconds.get(eq.id, 0.0) / 86400.0, 3) for eq in equipment_list]
+
     return render(
         request,
         "downtime_tracker/department.html",
-        {"department": department, "equipment_list": equipment_list},
+        {
+            "department": department,
+            "equipment_list": equipment_list,
+            "year": year,
+            "chart_labels_json": json.dumps(chart_labels),
+            "chart_values_json": json.dumps(chart_values_days),
+        },
     )
 
 
