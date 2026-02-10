@@ -27,6 +27,17 @@ def department_detail(request, code: str):
         Equipment.objects.filter(department=department, is_active=True)
         .order_by("asset_number")
     )
+    # Map equipment_id -> open downtime event (if any)
+    
+    open_events_qs = (
+        DowntimeEvent.objects.filter(
+            equipment__department=department,
+            equipment__is_active=True,
+            ended_at__isnull=True,
+        )
+        .select_related("equipment")
+    )
+    open_event_by_equipment_id = {ev.equipment_id: ev for ev in open_events_qs}
 
     # Year selection (defaults to current year)
     now_local = timezone.localtime(timezone.now())
