@@ -79,6 +79,7 @@ def department_detail(request, code: str):
             "year": year,
             "chart_labels_json": json.dumps(chart_labels),
             "chart_values_json": json.dumps(chart_values_days),
+            "open_event_by_equipment_id": open_event_by_equipment_id,
         },
     )
 
