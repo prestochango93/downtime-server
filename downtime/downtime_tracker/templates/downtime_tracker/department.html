@@ -1,6 +1,7 @@
 {% extends "downtime_tracker/base.html" %}
 {% load dt_extras %}
 {% block title %}{{ department.name }} — Downtime Tracker{% endblock %}
+<a class="btn" href="{% url 'downtime_tracker:department_export_csv' department.code %}?year={{ year }}">Export CSV</a>
 
 {% block content %}
   <div class="card">
