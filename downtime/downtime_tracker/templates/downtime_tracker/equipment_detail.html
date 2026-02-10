@@ -1,0 +1,89 @@
+{% extends "downtime_tracker/base.html" %}
+{% block title %}{{ equipment.asset_number }} — Downtime Tracker{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+      <div>
+        <h2 style="margin-top:0;">{{ equipment.asset_number }}</h2>
+        <div><strong>{{ equipment.description }}</strong></div>
+        <div class="muted">Department: <a href="{% url 'downtime_tracker:department_detail' equipment.department.code %}">{{ equipment.department.name }}</a></div>
+        {% if equipment.location %}<div class="muted">Location: {{ equipment.location }}</div>{% endif %}
+      </div>
+
+      <div style="text-align:right;">
+        <div class="muted">Current Status</div>
+        {% if equipment.status == "UP" %}
+          <span class="status-pill up">UP</span>
+        {% else %}
+          <span class="status-pill down">DOWN</span>
+        {% endif %}
+
+        <div style="height:10px;"></div>
+
+        {% if perms.downtime_tracker.change_equipment %}
+          <a class="btn btn-primary" href="{% url 'downtime_tracker:change_status' equipment.id %}">Change Status</a>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if equipment.status == "DOWN" and open_event %}
+      <div style="height:12px;"></div>
+      <div class="card" style="background:#fff7ed; border:1px solid #fed7aa;">
+        <div><strong>Down reason:</strong> {{ open_event.start_comment }}</div>
+        <div class="muted">Down since: {{ open_event.started_at }}</div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+      <h3 style="margin:0;">Downtime Summary</h3>
+
+      <form method="get" style="display:flex; gap:8px; align-items:center;">
+        <label for="year" style="margin:0;">Year</label>
+        <select name="year" id="year" onchange="this.form.submit()">
+          {% for y in years %}
+            <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+          {% endfor %}
+        </select>
+        <noscript><button class="btn" type="submit">Apply</button></noscript>
+      </form>
+    </div>
+
+    <div style="height:10px;"></div>
+    <div><strong>Total downtime ({{ year }}):</strong> {{ total_days_year }} days</div>
+  </div>
+
+  <div style="height:14px;"></div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Downtime Events (All)</h3>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Start</th>
+          <th>End</th>
+          <th>Duration (days)</th>
+          <th>Start comment</th>
+          <th>End comment</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ev in events_all %}
+          <tr>
+            <td>{{ ev.started_at }}</td>
+            <td>{% if ev.ended_at %}{{ ev.ended_at }}{% else %}<span class="status-pill down">OPEN</span>{% endif %}</td>
+            <td>{{ ev.duration_days|floatformat:3 }}</td>
+            <td>{{ ev.start_comment|default:"—" }}</td>
+            <td>{{ ev.end_comment|default:"—" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5" class="muted">No downtime events recorded for this equipment.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}
