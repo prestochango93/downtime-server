@@ -37,7 +37,7 @@
               {% if e.status == "DOWN" %}
               {% with ev=open_event_by_equipment_id|get_item:e.id %}
               {% if ev %}
-              {{ ev.start_comment }}
+              {{ ev.start_comment|truncatechars:80 }}
               {% else %}
                 <span class="muted">—</span>
               {% endif %}
