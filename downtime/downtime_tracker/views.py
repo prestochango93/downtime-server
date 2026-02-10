@@ -1,24 +1,20 @@
+import csv
 import json
 from datetime import datetime
-import csv
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.db.models import Q
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.timezone import make_aware
-from django.http import HttpResponse
+
 from .forms import EquipmentStatusForm
 from .models import Department, Equipment, DowntimeEvent
 
 
-
-@login_required
-def home(request):
-    departments = Department.objects.filter(is_active=True).order_by("name")
-    return render(request, "downtime_tracker/home.html", {"departments": departments})
-   
-    def _year_window_from_request(request):
+def _year_window_from_request(request):
     now_local = timezone.localtime(timezone.now())
     try:
         year = int(request.GET.get("year", now_local.year))
@@ -39,6 +35,12 @@ def _overlap_seconds(event, window_start, window_end, now_ts):
 
 
 @login_required
+def home(request):
+    departments = Department.objects.filter(is_active=True).order_by("name")
+    return render(request, "downtime_tracker/home.html", {"departments": departments})
+
+
+@login_required
 def department_detail(request, code: str):
     department = get_object_or_404(Department, code=code, is_active=True)
 
@@ -46,8 +48,8 @@ def department_detail(request, code: str):
         Equipment.objects.filter(department=department, is_active=True)
         .order_by("asset_number")
     )
-    # Map equipment_id -> open downtime event (if any)
-    
+
+    # Current open downtime events (for "Down reason" column)
     open_events_qs = (
         DowntimeEvent.objects.filter(
             equipment__department=department,
@@ -59,16 +61,9 @@ def department_detail(request, code: str):
     open_event_by_equipment_id = {ev.equipment_id: ev for ev in open_events_qs}
 
     # Year selection (defaults to current year)
-    now_local = timezone.localtime(timezone.now())
-    try:
-        year = int(request.GET.get("year", now_local.year))
-    except ValueError:
-        year = now_local.year
+    year, year_start, year_end = _year_window_from_request(request)
 
-    year_start = make_aware(datetime(year, 1, 1, 0, 0, 0))
-    year_end = make_aware(datetime(year + 1, 1, 1, 0, 0, 0))
-
-    # Events overlapping the year window
+    # Events overlapping the year window (for chart)
     events = (
         DowntimeEvent.objects.filter(equipment__department=department, equipment__is_active=True)
         .filter(started_at__lt=year_end)
@@ -80,12 +75,8 @@ def department_detail(request, code: str):
     now_ts = timezone.now()
 
     for ev in events:
-        overlap_start = max(ev.started_at, year_start)
-        overlap_end = min(ev.ended_at or now_ts, year_end)
-        if overlap_end > overlap_start:
-            totals_seconds[ev.equipment_id] += (overlap_end - overlap_start).total_seconds()
+        totals_seconds[ev.equipment_id] += _overlap_seconds(ev, year_start, year_end, now_ts)
 
-    # Build chart arrays (days)
     chart_labels = [eq.asset_number for eq in equipment_list]
     chart_values_days = [round(totals_seconds.get(eq.id, 0.0) / 86400.0, 3) for eq in equipment_list]
 
@@ -102,6 +93,7 @@ def department_detail(request, code: str):
         },
     )
 
+
 @login_required
 def department_export_csv(request, code: str):
     department = get_object_or_404(Department, code=code, is_active=True)
@@ -114,7 +106,6 @@ def department_export_csv(request, code: str):
         .order_by("asset_number")
     )
 
-    # Events overlapping the year for the entire department
     events = (
         DowntimeEvent.objects.filter(equipment__department=department, equipment__is_active=True)
         .filter(started_at__lt=year_end)
@@ -123,12 +114,10 @@ def department_export_csv(request, code: str):
         .order_by("equipment__asset_number", "-started_at")
     )
 
-    # Totals (seconds) per equipment
     totals_seconds = {eq.id: 0.0 for eq in equipment_list}
     for ev in events:
         totals_seconds[ev.equipment_id] += _overlap_seconds(ev, year_start, year_end, now_ts)
 
-    # Build response
     filename = f"{department.code}_downtime_{year}.csv"
     resp = HttpResponse(content_type="text/csv")
     resp["Content-Disposition"] = f'attachment; filename="{filename}"'
@@ -147,10 +136,8 @@ def department_export_csv(request, code: str):
         "Total Downtime This Year (days) for Equipment",
     ])
 
-    # Map equipment id -> total days
     total_days_by_eq = {eq_id: round(sec / 86400.0, 3) for eq_id, sec in totals_seconds.items()}
 
-    # Write rows per event; if equipment has no events, still output a row
     events_by_eq = {}
     for ev in events:
         events_by_eq.setdefault(ev.equipment_id, []).append(ev)
@@ -190,6 +177,7 @@ def department_export_csv(request, code: str):
             ])
 
     return resp
+
 
 @login_required
 def equipment_export_csv(request, pk: int):
@@ -235,35 +223,22 @@ def equipment_export_csv(request, pk: int):
         ])
 
     return resp
-    
+
+
 @login_required
 def equipment_detail(request, pk: int):
     equipment = get_object_or_404(Equipment.objects.select_related("department"), pk=pk, is_active=True)
 
-    # Year selection (defaults to current year)
-    now_local = timezone.localtime(timezone.now())
-    try:
-        year = int(request.GET.get("year", now_local.year))
-    except ValueError:
-        year = now_local.year
+    year, year_start, year_end = _year_window_from_request(request)
 
-    year_start = make_aware(datetime(year, 1, 1, 0, 0, 0))
-    year_end = make_aware(datetime(year + 1, 1, 1, 0, 0, 0))
+    events_all = DowntimeEvent.objects.filter(equipment=equipment).order_by("-started_at")
 
-    # All events for this equipment (for display)
-    events_all = (
-        DowntimeEvent.objects.filter(equipment=equipment)
-        .order_by("-started_at")
-    )
-
-    # Open event (if currently down)
     open_event = (
         DowntimeEvent.objects.filter(equipment=equipment, ended_at__isnull=True)
         .order_by("-started_at")
         .first()
     )
 
-    # Events overlapping the selected year (for totals)
     events_year = (
         DowntimeEvent.objects.filter(equipment=equipment)
         .filter(started_at__lt=year_end)
@@ -274,14 +249,11 @@ def equipment_detail(request, pk: int):
     now_ts = timezone.now()
     total_seconds_year = 0.0
     for ev in events_year:
-        overlap_start = max(ev.started_at, year_start)
-        overlap_end = min(ev.ended_at or now_ts, year_end)
-        if overlap_end > overlap_start:
-            total_seconds_year += (overlap_end - overlap_start).total_seconds()
+        total_seconds_year += _overlap_seconds(ev, year_start, year_end, now_ts)
 
     total_days_year = round(total_seconds_year / 86400.0, 3)
 
-    # Optional: convenience years list for dropdown
+    now_local = timezone.localtime(timezone.now())
     years = list(range(now_local.year - 2, now_local.year + 2 + 1))
 
     return render(
@@ -296,7 +268,8 @@ def equipment_detail(request, pk: int):
             "total_days_year": total_days_year,
         },
     )
-    
+
+
 @login_required
 @permission_required("downtime_tracker.change_equipment", raise_exception=True)
 def change_status(request, pk: int):
