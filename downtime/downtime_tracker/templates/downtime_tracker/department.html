@@ -45,55 +45,31 @@
       </tbody>
     </table>
   </div>
-@login_required
-def department_detail(request, code: str):
-    department = get_object_or_404(Department, code=code, is_active=True)
+<h3>Downtime (days)</h3>
+<div class="card">
+  <canvas id="downtimeChart" height="110"></canvas>
+</div>
 
-    equipment_list = (
-        Equipment.objects.filter(department=department, is_active=True)
-        .order_by("asset_number")
-    )
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const labels = JSON.parse('{{ chart_labels|escapejs }}');
+  const values = JSON.parse('{{ chart_values|escapejs }}');
 
-    # Year selection (defaults to current year)
-    now_local = timezone.localtime(timezone.now())
-    try:
-        year = int(request.GET.get("year", now_local.year))
-    except ValueError:
-        year = now_local.year
-
-    year_start = make_aware(datetime(year, 1, 1, 0, 0, 0))
-    year_end = make_aware(datetime(year + 1, 1, 1, 0, 0, 0))
-
-    # Events overlapping the year window
-    events = (
-        DowntimeEvent.objects.filter(equipment__department=department, equipment__is_active=True)
-        .filter(started_at__lt=year_end)
-        .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=year_start))
-        .select_related("equipment")
-    )
-
-    totals_seconds = {eq.id: 0.0 for eq in equipment_list}
-    now_ts = timezone.now()
-
-    for ev in events:
-        overlap_start = max(ev.started_at, year_start)
-        overlap_end = min(ev.ended_at or now_ts, year_end)
-        if overlap_end > overlap_start:
-            totals_seconds[ev.equipment_id] += (overlap_end - overlap_start).total_seconds()
-
-    # Build chart arrays (days)
-    chart_labels = [eq.asset_number for eq in equipment_list]
-    chart_values_days = [round(totals_seconds.get(eq.id, 0.0) / 86400.0, 3) for eq in equipment_list]
-
-    return render(
-        request,
-        "downtime_tracker/department.html",
-        {
-            "department": department,
-            "equipment_list": equipment_list,
-            "year": year,
-            "chart_labels_json": json.dumps(chart_labels),
-            "chart_values_json": json.dumps(chart_values_days),
-        },
-    )
+  const ctx = document.getElementById('downtimeChart');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Downtime (days)',
+        data: values
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: true } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+</script>
 {% endblock %}
