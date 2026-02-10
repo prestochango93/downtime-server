@@ -23,6 +23,7 @@
 
         {% if perms.downtime_tracker.change_equipment %}
           <a class="btn btn-primary" href="{% url 'downtime_tracker:change_status' equipment.id %}">Change Status</a>
+          <a class="btn" href="{% url 'downtime_tracker:equipment_export_csv' equipment.id %}?year={{ year }}">Export CSV</a>
         {% endif %}
       </div>
     </div>
