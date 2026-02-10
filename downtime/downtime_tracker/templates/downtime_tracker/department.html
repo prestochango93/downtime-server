@@ -16,6 +16,7 @@
           <th>Asset #</th>
           <th>Description</th>
           <th>Status</th>
+          <th>Down reason</th>
           <th class="right">Action</th>
         </tr>
       </thead>
@@ -29,6 +30,19 @@
                 <span class="status-pill up">UP</span>
               {% else %}
                 <span class="status-pill down">DOWN</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if e.status == "DOWN" %}
+              {% with ev=open_event_by_equipment_id|get_item:e.id %}
+              {% if ev %}
+              {{ ev.start_comment }}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+              {% endwith %}
+              {% else %}
+                <span class="muted">—</span>
               {% endif %}
             </td>
             <td class="right">
