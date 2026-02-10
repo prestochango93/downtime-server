@@ -24,7 +24,9 @@
       <tbody>
         {% for e in equipment_list %}
           <tr>
-            <td>{{ e.asset_number }}</td>
+            <td>
+              <a href="{% url 'downtime_tracker:equipment_detail' e.id %}">{{ e.asset_number }}</a>
+            </td>
             <td>{{ e.description }}</td>
             <td>
               {% if e.status == "UP" %}
