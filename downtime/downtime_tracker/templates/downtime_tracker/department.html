@@ -70,8 +70,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-  const labels = JSON.parse('{{ chart_labels|escapejs }}');
-  const values = JSON.parse('{{ chart_values|escapejs }}');
+  const labels = {{ chart_labels_json|safe }};
+  const values = {{ chart_values_json|safe }};
 
   const ctx = document.getElementById('downtimeChart');
   new Chart(ctx, {
