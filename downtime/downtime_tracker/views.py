@@ -273,38 +273,85 @@ def equipment_detail(request, pk: int):
     equipment = get_object_or_404(
         Equipment.objects.select_related("department"),
         pk=pk,
-        is_active=True,
+        is_active=True
     )
 
     year, year_start, year_end = _year_window_from_request(request)
-    cat, cat_filter = _cat_from_request(request)
 
-    events_all = DowntimeEvent.objects.filter(equipment=equipment)
-    if cat_filter:
-        events_all = events_all.filter(category=cat_filter)
-    events_all = events_all.order_by("-started_at")
+    # NEW: category filter (defaults to ALL)
+    cat = (request.GET.get("cat") or "ALL").upper().strip()
+    cat_choices = [("PLANNED", "Calibration / Preventive Maintenance"), ("UNPLANNED", "Unplanned")]
 
-    open_event_qs = DowntimeEvent.objects.filter(equipment=equipment, ended_at__isnull=True)
-    if cat_filter:
-        open_event_qs = open_event_qs.filter(category=cat_filter)
-    open_event = open_event_qs.order_by("-started_at").first()
+    # base queryset
+    events_all_qs = DowntimeEvent.objects.filter(equipment=equipment).order_by("-started_at")
 
-    events_year = DowntimeEvent.objects.filter(
-        equipment=equipment,
-        started_at__lt=year_end,
-    ).filter(
-        Q(ended_at__isnull=True) | Q(ended_at__gt=year_start)
+    # apply filter to the table if not ALL
+    if cat != "ALL":
+        valid = {v for v, _ in DowntimeEvent.Category.choices}
+        if cat in valid:
+            events_all_qs = events_all_qs.filter(category=cat)
+
+    events_all = events_all_qs
+
+    open_event = (
+        DowntimeEvent.objects.filter(equipment=equipment, ended_at__isnull=True)
+        .order_by("-started_at")
+        .first()
     )
-    if cat_filter:
-        events_year = events_year.filter(category=cat_filter)
-    events_year = events_year.order_by("-started_at")
+
+    # events overlapping year window (respect cat filter for totals)
+    events_year_qs = (
+        DowntimeEvent.objects.filter(equipment=equipment)
+        .filter(started_at__lt=year_end)
+        .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=year_start))
+    )
+
+    if cat != "ALL":
+        valid = {v for v, _ in DowntimeEvent.Category.choices}
+        if cat in valid:
+            events_year_qs = events_year_qs.filter(category=cat)
+
+    events_year = events_year_qs.order_by("-started_at")
 
     now_ts = timezone.now()
+
+    # total downtime (for current filter)
     total_seconds_year = 0.0
     for ev in events_year:
         total_seconds_year += _overlap_seconds(ev, year_start, year_end, now_ts)
-
     total_days_year = round(total_seconds_year / 86400.0, 3)
+
+    # NEW: category split chart ONLY when cat == ALL
+    chart_labels_json = "null"
+    chart_values_json = "null"
+    if cat == "ALL":
+        events_year_all = (
+            DowntimeEvent.objects.filter(equipment=equipment)
+            .filter(started_at__lt=year_end)
+            .filter(Q(ended_at__isnull=True) | Q(ended_at__gt=year_start))
+        )
+
+        seconds_by_cat = {
+            DowntimeEvent.Category.PLANNED: 0.0,
+            DowntimeEvent.Category.UNPLANNED: 0.0,
+        }
+
+        for ev in events_year_all:
+            seconds_by_cat[ev.category] = seconds_by_cat.get(ev.category, 0.0) + _overlap_seconds(
+                ev, year_start, year_end, now_ts
+            )
+
+        labels = [
+            DowntimeEvent.Category.PLANNED.label,
+            DowntimeEvent.Category.UNPLANNED.label,
+        ]
+        values = [
+            round(seconds_by_cat.get(DowntimeEvent.Category.PLANNED, 0.0) / 86400.0, 3),
+            round(seconds_by_cat.get(DowntimeEvent.Category.UNPLANNED, 0.0) / 86400.0, 3),
+        ]
+
+        chart_labels_json = json.dumps(labels)
+        chart_values_json = json.dumps(values)
 
     now_local = timezone.localtime(timezone.now())
     years = list(range(now_local.year - 2, now_local.year + 2 + 1))
@@ -318,9 +365,11 @@ def equipment_detail(request, pk: int):
             "events_all": events_all,
             "year": year,
             "years": years,
-            "cat": cat,
-            "cat_choices": DowntimeEvent.Category.choices,
             "total_days_year": total_days_year,
+            "cat": cat,
+            "cat_choices": cat_choices,  # or DowntimeEvent.Category.choices if you prefer
+            "chart_labels_json": chart_labels_json,
+            "chart_values_json": chart_values_json,
         },
     )
 
