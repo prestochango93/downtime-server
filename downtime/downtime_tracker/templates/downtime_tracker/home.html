@@ -1,163 +1,120 @@
-{% extends "downtime_tracker/base.html" %}
-{% block title %}Plant Dashboard — Downtime Tracker{% endblock %}
+@login_required
+def home(request):
+    """
+    Plant dashboard (this is now the HOME page).
+    Provides:
+      - KPIs: total downtime days, event count, MTTR hours, MTBF hours
+      - Pareto chart: downtime by department (top N)
+      - Category chart: planned vs unplanned (if filtered, shows 100% for that type)
+      - Departments grid
+    """
+    year, year_start, year_end = _year_window_from_request(request)
+    cat, cat_filter = _cat_from_request(request)
+    now_ts = timezone.now()
 
-{% block content %}
+    # Departments for the bottom grid
+    departments = Department.objects.filter(is_active=True).order_by("name")
 
-<!-- ================= HEADER / FILTERS ================= -->
-<div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
-    <div>
-      <h2 style="margin-top:0;">Plant Dashboard</h2>
-      <div class="muted">
-        Year: <strong>{{ year }}</strong>
-        {% if cat != "ALL" %}
-          · Type: <strong>{{ cat }}</strong>
-        {% else %}
-          · Type: <strong>ALL</strong>
-        {% endif %}
-      </div>
-    </div>
+    # Base events in selected window, active equipment + active depts only
+    events_qs = DowntimeEvent.objects.filter(
+        equipment__is_active=True,
+        equipment__department__is_active=True,
+    )
+    events_qs = _events_overlapping_window(base_qs=events_qs, year_start=year_start, year_end=year_end)
+    events_qs = events_qs.select_related("equipment", "equipment__department")
 
-    <form method="get" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
-      <div style="min-width:120px;">
-        <label for="id_year">Year</label>
-        <input id="id_year" name="year" type="number" value="{{ year }}" style="width:120px;">
-      </div>
+    # Apply category filter to "primary" metrics/charts
+    if cat_filter:
+        events_filtered = events_qs.filter(category=cat_filter)
+    else:
+        events_filtered = events_qs
 
-      <div style="min-width:220px;">
-        <label for="id_cat">Downtime Type</label>
-        <select id="id_cat" name="cat">
-          <option value="ALL" {% if cat == "ALL" %}selected{% endif %}>All</option>
-          {% for v,l in cat_choices %}
-            <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ l }}</option>
-          {% endfor %}
-        </select>
-      </div>
+    # --- KPI calculations ---
+    total_downtime_sec = 0.0
+    event_count = 0
 
-      <div>
-        <button class="btn btn-primary" type="submit">Apply</button>
-      </div>
-    </form>
-  </div>
-</div>
+    for ev in events_filtered:
+        total_downtime_sec += _overlap_seconds(ev, year_start, year_end, now_ts)
+        event_count += 1
 
-<div style="height:18px;"></div>
+    kpi_total_days = round(total_downtime_sec / 86400.0, 3)
 
-<!-- ================= KPIs ================= -->
-<div class="grid">
-  <div class="card">
-    <div class="muted">Total Downtime</div>
-    <h2 style="margin:4px 0;">{{ kpi_total_days }} days</h2>
-  </div>
+    # MTTR/MTBF on the filtered set
+    win_sec = _window_seconds(year_start, year_end, now_ts)
+    uptime_sec = max(0.0, win_sec - total_downtime_sec)
 
-  <div class="card">
-    <div class="muted">Events</div>
-    <h2 style="margin:4px 0;">{{ kpi_event_count }}</h2>
-  </div>
+    mttr_hours = _safe_div(total_downtime_sec, event_count, default=0.0) / 3600.0
+    mtbf_hours = _safe_div(uptime_sec, event_count, default=0.0) / 3600.0
 
-  <div class="card">
-    <div class="muted">MTTR</div>
-    <h2 style="margin:4px 0;">{{ kpi_mttr }} hrs</h2>
-  </div>
+    kpi_mttr = round(mttr_hours, 2)
+    kpi_mtbf = round(mtbf_hours, 2)
 
-  <div class="card">
-    <div class="muted">MTBF</div>
-    <h2 style="margin:4px 0;">{{ kpi_mtbf }} hrs</h2>
-  </div>
-</div>
+    # --- Pareto: downtime by department (top N) ---
+    dept_seconds = {}
+    for ev in events_filtered:
+        dept_id = ev.equipment.department_id
+        dept_seconds[dept_id] = dept_seconds.get(dept_id, 0.0) + _overlap_seconds(ev, year_start, year_end, now_ts)
 
-<div style="height:18px;"></div>
+    pareto_rows = []
+    for d in departments:
+        sec = dept_seconds.get(d.id, 0.0)
+        if sec > 0:
+            pareto_rows.append((d.name, round(sec / 86400.0, 3)))
 
-<!-- ================= CHARTS ================= -->
-<div class="grid">
+    pareto_rows.sort(key=lambda x: x[1], reverse=True)
+    top_n = 10
+    pareto_rows = pareto_rows[:top_n]
 
-  <!-- Pareto -->
-  <div class="card">
-    <h3 style="margin-top:0;">Downtime by Department (Pareto)</h3>
-    <canvas id="paretoChart" height="160"></canvas>
-    {% if pareto_labels_json == "[]" %}
-      <div class="muted" style="margin-top:10px;">No downtime recorded for the selected filters.</div>
-    {% endif %}
-  </div>
+    pareto_labels_json = json.dumps([r[0] for r in pareto_rows])
+    pareto_values_json = json.dumps([r[1] for r in pareto_rows])
 
-  <!-- Category breakdown -->
-  <div class="card">
-    <h3 style="margin-top:0;">Planned vs Unplanned</h3>
-    <canvas id="catChart" height="160"></canvas>
-  </div>
+    # --- Category pie (planned vs unplanned) ---
+    # If a category filter is applied, show a single-slice pie at 100% for that category.
+    if cat_filter:
+        # Find the label for the selected category
+        label = dict(DowntimeEvent.Category.choices).get(cat_filter, cat_filter)
+        cat_labels_json = json.dumps([label])
+        cat_values_json = json.dumps([kpi_total_days])
+    else:
+        # Split by category using ALL events in window (no category filter)
+        sec_planned = 0.0
+        sec_unplanned = 0.0
 
-</div>
+        for ev in events_qs:
+            sec = _overlap_seconds(ev, year_start, year_end, now_ts)
+            if ev.category == DowntimeEvent.Category.PLANNED:
+                sec_planned += sec
+            else:
+                sec_unplanned += sec
 
-<div style="height:22px;"></div>
+        cat_labels_json = json.dumps([
+            DowntimeEvent.Category.PLANNED.label,
+            DowntimeEvent.Category.UNPLANNED.label,
+        ])
+        cat_values_json = json.dumps([
+            round(sec_planned / 86400.0, 3),
+            round(sec_unplanned / 86400.0, 3),
+        ])
 
-<!-- ================= DEPARTMENTS ================= -->
-<div class="card">
-  <h2 style="margin-top:0;">Departments</h2>
-  <p class="muted">Select a department to view equipment status.</p>
-</div>
+    return render(
+        request,
+        "downtime_tracker/home.html",
+        {
+            "year": year,
+            "cat": cat,
+            "cat_choices": DowntimeEvent.Category.choices,
+            "departments": departments,
 
-<div style="height:14px;"></div>
+            # KPIs used by template
+            "kpi_total_days": kpi_total_days,
+            "kpi_event_count": event_count,
+            "kpi_mttr": kpi_mttr,
+            "kpi_mtbf": kpi_mtbf,
 
-<div class="grid">
-  {% for d in departments %}
-    <div class="card">
-      <h3 style="margin:0 0 6px 0;">{{ d.name }}</h3>
-      {% if d.description %}
-        <div class="muted">{{ d.description }}</div>
-      {% endif %}
-
-      <div style="height:12px;"></div>
-
-      <a class="btn btn-primary"
-         href="{% url 'downtime_tracker:department_detail' d.code %}?year={{ year }}&cat={{ cat }}">
-         View equipment
-      </a>
-    </div>
-  {% empty %}
-    <div class="card">No active departments yet.</div>
-  {% endfor %}
-</div>
-
-<!-- ================= CHART JS ================= -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<script>
-/* Pareto */
-const paretoLabels = {{ pareto_labels_json|safe }};
-const paretoValues = {{ pareto_values_json|safe }};
-
-if (paretoLabels && paretoLabels.length) {
-  new Chart(document.getElementById('paretoChart'), {
-    type: 'bar',
-    data: {
-      labels: paretoLabels,
-      datasets: [{
-        label: 'Downtime (days)',
-        data: paretoValues
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: true } }
-    }
-  });
-}
-
-/* Planned vs Unplanned */
-const catLabels = {{ cat_labels_json|safe }};
-const catValues = {{ cat_values_json|safe }};
-
-new Chart(document.getElementById('catChart'), {
-  type: 'pie',
-  data: {
-    labels: catLabels,
-    datasets: [{
-      data: catValues
-    }]
-  },
-  options: { responsive: true }
-});
-</script>
-
-{% endblock %}
+            # Charts used by template
+            "pareto_labels_json": pareto_labels_json,
+            "pareto_values_json": pareto_values_json,
+            "cat_labels_json": cat_labels_json,
+            "cat_values_json": cat_values_json,
+        },
+    )
