@@ -1,12 +1,38 @@
 {% extends "downtime_tracker/base.html" %}
 {% load dt_extras %}
 {% block title %}{{ department.name }} — Downtime Tracker{% endblock %}
-<a class="btn" href="{% url 'downtime_tracker:department_export_csv' department.code %}?year={{ year }}">Export CSV</a>
 
 {% block content %}
   <div class="card">
-    <h2 style="margin-top:0;">{{ department.name }}</h2>
-    {% if department.description %}<div class="muted">{{ department.description }}</div>{% endif %}
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+      <div>
+        <h2 style="margin-top:0;">{{ department.name }}</h2>
+        {% if department.description %}<div class="muted">{{ department.description }}</div>{% endif %}
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+        <form method="get" style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+          <div>
+            <label class="muted" for="id_year">Year</label><br>
+            <input id="id_year" name="year" type="number" value="{{ year }}" style="width:110px;">
+          </div>
+
+          <div>
+            <label class="muted" for="id_cat">Downtime Type</label><br>
+            <select id="id_cat" name="cat">
+              <option value="ALL" {% if cat == "ALL" %}selected{% endif %}>All</option>
+              {% for v,l in cat_choices %}
+                <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ l }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <button class="btn" type="submit">Apply</button>
+        </form>
+
+        <a class="btn" href="{% url 'downtime_tracker:department_export_csv' department.code %}?year={{ year }}&cat={{ cat }}">Export CSV</a>
+      </div>
+    </div>
   </div>
 
   <div style="height:14px;"></div>
@@ -26,7 +52,7 @@
         {% for e in equipment_list %}
           <tr>
             <td>
-              <a href="{% url 'downtime_tracker:equipment_detail' e.id %}">{{ e.asset_number }}</a>
+              <a href="{% url 'downtime_tracker:equipment_detail' e.id %}?year={{ year }}&cat={{ cat }}">{{ e.asset_number }}</a>
             </td>
             <td>{{ e.description }}</td>
             <td>
@@ -58,7 +84,7 @@
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="4" class="muted">No equipment found for this department.</td></tr>
+          <tr><td colspan="5" class="muted">No equipment found for this department.</td></tr>
         {% endfor %}
       </tbody>
     </table>
