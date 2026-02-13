@@ -3,6 +3,46 @@
 
 {% block content %}
 
+<!-- ================= HEADER / FILTERS ================= -->
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+    <div>
+      <h2 style="margin-top:0;">Plant Dashboard</h2>
+      <div class="muted">
+        Year: <strong>{{ year }}</strong>
+        {% if cat != "ALL" %}
+          · Type: <strong>{{ cat }}</strong>
+        {% else %}
+          · Type: <strong>ALL</strong>
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="get" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+      <div style="min-width:120px;">
+        <label for="id_year">Year</label>
+        <input id="id_year" name="year" type="number" value="{{ year }}" style="width:120px;">
+      </div>
+
+      <div style="min-width:220px;">
+        <label for="id_cat">Downtime Type</label>
+        <select id="id_cat" name="cat">
+          <option value="ALL" {% if cat == "ALL" %}selected{% endif %}>All</option>
+          {% for v,l in cat_choices %}
+            <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div style="height:18px;"></div>
+
 <!-- ================= KPIs ================= -->
 <div class="grid">
   <div class="card">
@@ -26,9 +66,7 @@
   </div>
 </div>
 
-
 <div style="height:18px;"></div>
-
 
 <!-- ================= CHARTS ================= -->
 <div class="grid">
@@ -37,6 +75,9 @@
   <div class="card">
     <h3 style="margin-top:0;">Downtime by Department (Pareto)</h3>
     <canvas id="paretoChart" height="160"></canvas>
+    {% if pareto_labels_json == "[]" %}
+      <div class="muted" style="margin-top:10px;">No downtime recorded for the selected filters.</div>
+    {% endif %}
   </div>
 
   <!-- Category breakdown -->
@@ -47,9 +88,7 @@
 
 </div>
 
-
 <div style="height:22px;"></div>
-
 
 <!-- ================= DEPARTMENTS ================= -->
 <div class="card">
@@ -70,7 +109,7 @@
       <div style="height:12px;"></div>
 
       <a class="btn btn-primary"
-         href="{% url 'downtime_tracker:department_detail' d.code %}">
+         href="{% url 'downtime_tracker:department_detail' d.code %}?year={{ year }}&cat={{ cat }}">
          View equipment
       </a>
     </div>
@@ -78,7 +117,6 @@
     <div class="card">No active departments yet.</div>
   {% endfor %}
 </div>
-
 
 <!-- ================= CHART JS ================= -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -88,22 +126,23 @@
 const paretoLabels = {{ pareto_labels_json|safe }};
 const paretoValues = {{ pareto_values_json|safe }};
 
-new Chart(document.getElementById('paretoChart'), {
-  type: 'bar',
-  data: {
-    labels: paretoLabels,
-    datasets: [{
-      label: 'Downtime (days)',
-      data: paretoValues
-    }]
-  },
-  options: {
-    responsive: true,
-    plugins: { legend: { display: true } },
-    scales: { y: { beginAtZero: true } }
-  }
-});
-
+if (paretoLabels && paretoLabels.length) {
+  new Chart(document.getElementById('paretoChart'), {
+    type: 'bar',
+    data: {
+      labels: paretoLabels,
+      datasets: [{
+        label: 'Downtime (days)',
+        data: paretoValues
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: true } },
+      scales: { y: { beginAtZero: true } }
+    }
+  });
+}
 
 /* Planned vs Unplanned */
 const catLabels = {{ cat_labels_json|safe }};
@@ -117,9 +156,7 @@ new Chart(document.getElementById('catChart'), {
       data: catValues
     }]
   },
-  options: {
-    responsive: true
-  }
+  options: { responsive: true }
 });
 </script>
 
