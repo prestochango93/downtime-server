@@ -161,7 +161,18 @@ class StatusChangeLog(models.Model):
 
 
 class DowntimeEvent(models.Model):
+    class Category(models.TextChoices):
+        PLANNED = "PLANNED", "Calibration / Preventive Maintenance"
+        UNPLANNED = "UNPLANNED", "Unplanned"
+
     equipment = models.ForeignKey(Equipment, on_delete=models.CASCADE, related_name="downtime_events")
+
+    category = models.CharField(
+        max_length=12,
+        choices=Category.choices,
+        default=Category.UNPLANNED,
+        db_index=True,
+    )
 
     started_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
@@ -207,8 +218,8 @@ class DowntimeEvent(models.Model):
         indexes = [
             models.Index(fields=["equipment", "-started_at"]),
             models.Index(fields=["ended_at"]),
+            models.Index(fields=["category"]),  # optional; db_index=True already covers this
         ]
-        
 
     def __str__(self) -> str:
         if self.ended_at:
@@ -226,7 +237,6 @@ class DowntimeEvent(models.Model):
     def duration(self) -> timedelta:
         if not self.started_at:
             return timedelta(0)
-
         end = self.ended_at or timezone.now()
         return end - self.started_at
 
