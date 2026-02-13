@@ -7,6 +7,9 @@ urlpatterns = [
     # Home IS the plant dashboard
     path("", views.home, name="home"),
 
+    # Alias so any old templates linking to plant_dashboard stop crashing
+    path("dashboard/", views.home, name="plant_dashboard"),
+
     path("dept/<slug:code>/", views.department_detail, name="department_detail"),
 
     path("equipment/<int:pk>/", views.equipment_detail, name="equipment_detail"),
