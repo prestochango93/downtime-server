@@ -4,22 +4,73 @@
 {% block content %}
   <div class="card">
     <h2 style="margin-top:0;">Change Status</h2>
+
     <div><strong>{{ equipment.asset_number }}</strong> — {{ equipment.description }}</div>
     <div class="muted">Department: {{ equipment.department.name }}</div>
-    <div style="height:10px;"></div>
+
+    <div style="height:12px;"></div>
 
     <form method="post">
       {% csrf_token %}
 
-      <label for="id_new_status">New status</label>
-      {{ form.new_status }}
+      {% if next %}
+        <input type="hidden" name="next" value="{{ next }}">
+      {% endif %}
 
-      <label for="id_comment">Comment (required)</label>
-      {{ form.comment }}
+      <div style="display:flex; flex-direction:column; gap:12px; max-width:520px;">
 
-      <div style="height:12px;"></div>
+        <!-- Status -->
+        <div>
+          <label for="id_new_status"><strong>New status</strong></label><br>
+          {{ form.new_status }}
+        </div>
+
+        <!-- Downtime Category (only relevant when DOWN) -->
+        <div id="category-wrapper">
+          <label for="id_downtime_category">
+            <strong>Downtime type</strong>
+          </label><br>
+          {{ form.downtime_category }}
+          <div class="muted" style="font-size:12px;">
+            Required when setting equipment to DOWN.
+          </div>
+        </div>
+
+        <!-- Comment -->
+        <div>
+          <label for="id_comment"><strong>Comment (required)</strong></label><br>
+          {{ form.comment }}
+        </div>
+
+      </div>
+
+      <div style="height:18px;"></div>
+
       <button class="btn btn-primary" type="submit">Submit</button>
-      <a class="btn" href="{% url 'downtime_tracker:department_detail' equipment.department.code %}">Cancel</a>
+
+      {% if next %}
+        <a class="btn" href="{{ next }}">Cancel</a>
+      {% else %}
+        <a class="btn" href="{% url 'downtime_tracker:department_detail' equipment.department.code %}">Cancel</a>
+      {% endif %}
     </form>
   </div>
+
+  <script>
+    // Hide category unless DOWN is selected
+    const statusSelect = document.getElementById("id_new_status");
+    const categoryWrapper = document.getElementById("category-wrapper");
+
+    function toggleCategory() {
+      if (statusSelect.value === "DOWN") {
+        categoryWrapper.style.display = "block";
+      } else {
+        categoryWrapper.style.display = "none";
+      }
+    }
+
+    toggleCategory();
+    statusSelect.addEventListener("change", toggleCategory);
+  </script>
+
 {% endblock %}
