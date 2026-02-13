@@ -121,7 +121,6 @@
         {% for ev in events_all %}
           <tr>
             <td>{{ ev.started_at }}</td>
-
             <td>
               {% if ev.ended_at %}
                 {{ ev.ended_at }}
@@ -129,7 +128,6 @@
                 <span class="status-pill down">OPEN</span>
               {% endif %}
             </td>
-
             <td>{{ ev.duration_days|floatformat:3 }}</td>
             <td>{{ ev.get_category_display }}</td>
             <td>{{ ev.start_comment|default:"—" }}</td>
@@ -137,13 +135,43 @@
           </tr>
         {% empty %}
           <tr>
-            <td colspan="6" class="muted">
-              No downtime events recorded for this equipment.
-            </td>
+            <td colspan="6" class="muted">No downtime events recorded for this equipment.</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
+
+    {% if cat == "ALL" %}
+      <div style="height:14px;"></div>
+
+      <h3 style="margin-top:0;">Downtime Breakdown ({{ year }})</h3>
+      <div style="max-width:720px;">
+        <canvas id="downtimeBreakdown" height="110"></canvas>
+      </div>
+
+      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+      <script>
+        const breakdownLabels = {{ chart_labels_json|safe }};
+        const breakdownValues = {{ chart_values_json|safe }};
+
+        const ctx2 = document.getElementById('downtimeBreakdown');
+        new Chart(ctx2, {
+          type: 'bar',
+          data: {
+            labels: breakdownLabels,
+            datasets: [{
+              label: 'Downtime (days)',
+              data: breakdownValues
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: true } },
+            scales: { y: { beginAtZero: true } }
+          }
+        });
+      </script>
+    {% endif %}
   </div>
 
 {% endblock %}
