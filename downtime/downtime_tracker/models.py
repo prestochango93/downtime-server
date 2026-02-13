@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import Q, F
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -33,7 +33,9 @@ class Equipment(models.Model):
         UP = "UP", "Up"
         DOWN = "DOWN", "Down"
 
-    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="equipment")
+    department = models.ForeignKey(
+        Department, on_delete=models.PROTECT, related_name="equipment"
+    )
     asset_number = models.CharField(max_length=64, unique=True)
     description = models.CharField(max_length=255)
     location = models.CharField(max_length=255, blank=True, default="")
@@ -57,95 +59,96 @@ class Equipment(models.Model):
         return self.downtime_events.filter(ended_at__isnull=True).exists()
 
     @transaction.atomic
-def set_status(
-    self,
-    *,
-    new_status: str,
-    comment: str,
-    user=None,
-    changed_at=None,
-    downtime_category=None,  # <-- ADD THIS
-) -> "StatusChangeLog":
-    """
-    Rules:
-    - Comment REQUIRED on any status change.
-    - DOWN starts a downtime event (category REQUIRED).
-    - UP ends the currently open downtime event.
-    - Prevents duplicate open events per equipment.
-    """
-    new_status = str(new_status).upper().strip()
-    if new_status not in (self.Status.UP, self.Status.DOWN):
-        raise ValidationError(f"Invalid status: {new_status}")
+    def set_status(
+        self,
+        *,
+        new_status: str,
+        comment: str,
+        user=None,
+        changed_at=None,
+        downtime_category=None,
+    ) -> "StatusChangeLog":
+        """
+        Rules:
+        - Comment REQUIRED on any status change.
+        - DOWN starts a downtime event (category REQUIRED when DOWN).
+        - UP ends the currently open downtime event.
+        - Prevents duplicate open events per equipment.
+        """
+        new_status = str(new_status).upper().strip()
+        if new_status not in (self.Status.UP, self.Status.DOWN):
+            raise ValidationError(f"Invalid status: {new_status}")
 
-    comment = (comment or "").strip()
-    if not comment:
-        raise ValidationError("A comment is required when changing status.")
+        comment = (comment or "").strip()
+        if not comment:
+            raise ValidationError("A comment is required when changing status.")
 
-    changed_at = changed_at or timezone.now()
-    old_status = self.status
+        changed_at = changed_at or timezone.now()
+        old_status = self.status
 
-    if new_status == old_status:
-        raise ValidationError(f"Equipment is already {new_status}.")
+        if new_status == old_status:
+            raise ValidationError(f"Equipment is already {new_status}.")
 
-    log = StatusChangeLog.objects.create(
-        equipment=self,
-        changed_by=user if user and getattr(user, "is_authenticated", False) else None,
-        from_status=old_status,
-        to_status=new_status,
-        comment=comment,
-        changed_at=changed_at,
-    )
+        log = StatusChangeLog.objects.create(
+            equipment=self,
+            changed_by=user if user and getattr(user, "is_authenticated", False) else None,
+            from_status=old_status,
+            to_status=new_status,
+            comment=comment,
+            changed_at=changed_at,
+        )
 
-    if new_status == self.Status.DOWN:
-        if self.downtime_events.filter(ended_at__isnull=True).exists():
-            raise ValidationError("This equipment already has an open downtime event.")
+        if new_status == self.Status.DOWN:
+            if self.downtime_events.filter(ended_at__isnull=True).exists():
+                raise ValidationError("This equipment already has an open downtime event.")
 
-        # --- NEW: require & validate category on DOWN ---
-        if not downtime_category:
-            raise ValidationError(
-                "Downtime category is required when setting equipment to DOWN "
-                "(Calibration/PM or Unplanned)."
+            # Category required when going DOWN
+            if not downtime_category:
+                raise ValidationError(
+                    "Downtime category is required when setting equipment to DOWN "
+                    "(Calibration/PM or Unplanned)."
+                )
+
+            downtime_category = str(downtime_category).upper().strip()
+            valid = {c for c, _ in DowntimeEvent.Category.choices}
+            if downtime_category not in valid:
+                raise ValidationError(f"Invalid downtime category: {downtime_category}")
+
+            DowntimeEvent.objects.create(
+                equipment=self,
+                started_at=changed_at,
+                start_comment=comment,
+                category=downtime_category,
+                created_by=log.changed_by,
+                started_by_log=log,
             )
 
-        downtime_category = str(downtime_category).upper().strip()
-        valid = {c for c, _ in DowntimeEvent.Category.choices}
-        if downtime_category not in valid:
-            raise ValidationError(f"Invalid downtime category: {downtime_category}")
-        # ------------------------------------------------
+        elif new_status == self.Status.UP:
+            open_evt = (
+                self.downtime_events.select_for_update()
+                .filter(ended_at__isnull=True)
+                .order_by("-started_at")
+                .first()
+            )
+            if not open_evt:
+                raise ValidationError("Cannot set UP because there is no open downtime event to close.")
 
-        DowntimeEvent.objects.create(
-            equipment=self,
-            started_at=changed_at,
-            start_comment=comment,
-            category=downtime_category,  # <-- NEW
-            created_by=log.changed_by,
-            started_by_log=log,
-        )
+            open_evt.ended_at = changed_at
+            open_evt.end_comment = comment
+            open_evt.closed_by = log.changed_by
+            open_evt.ended_by_log = log
+            open_evt.full_clean()
+            open_evt.save(
+                update_fields=["ended_at", "end_comment", "closed_by", "ended_by_log", "updated_at"]
+            )
 
-    elif new_status == self.Status.UP:
-        open_evt = (
-            self.downtime_events.select_for_update()
-            .filter(ended_at__isnull=True)
-            .order_by("-started_at")
-            .first()
-        )
-        if not open_evt:
-            raise ValidationError("Cannot set UP because there is no open downtime event to close.")
+        self.status = new_status
+        self.status_updated_at = changed_at
+        self.save(update_fields=["status", "status_updated_at"])
 
-        open_evt.ended_at = changed_at
-        open_evt.end_comment = comment
-        open_evt.closed_by = log.changed_by
-        open_evt.ended_by_log = log
-        open_evt.full_clean()
-        open_evt.save(
-            update_fields=["ended_at", "end_comment", "closed_by", "ended_by_log", "updated_at"]
-        )
+        return log
 
-    self.status = new_status
-    self.status_updated_at = changed_at
-    self.save(update_fields=["status", "status_updated_at"])
 
-    return log
 class StatusChangeLog(models.Model):
     equipment = models.ForeignKey(Equipment, on_delete=models.CASCADE, related_name="status_logs")
     changed_by = models.ForeignKey(
@@ -232,7 +235,18 @@ class DowntimeEvent(models.Model):
         indexes = [
             models.Index(fields=["equipment", "-started_at"]),
             models.Index(fields=["ended_at"]),
-            models.Index(fields=["category"]),  # optional; db_index=True already covers this
+            models.Index(fields=["category"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["equipment"],
+                condition=Q(ended_at__isnull=True),
+                name="unique_open_downtime_event_per_equipment",
+            ),
+            models.CheckConstraint(
+                check=Q(ended_at__isnull=True) | Q(ended_at__gt=models.F("started_at")),
+                name="downtime_end_after_start",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -249,8 +263,6 @@ class DowntimeEvent(models.Model):
 
     @property
     def duration(self) -> timedelta:
-        if not self.started_at:
-            return timedelta(0)
         end = self.ended_at or timezone.now()
         return end - self.started_at
 
