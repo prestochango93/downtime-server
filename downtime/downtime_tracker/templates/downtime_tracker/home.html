@@ -1,24 +1,126 @@
 {% extends "downtime_tracker/base.html" %}
-{% block title %}Departments — Downtime Tracker{% endblock %}
+{% block title %}Plant Dashboard — Downtime Tracker{% endblock %}
 
 {% block content %}
+
+<!-- ================= KPIs ================= -->
+<div class="grid">
   <div class="card">
-    <h2 style="margin-top:0;">Departments</h2>
-    <p class="muted">Select a department to view equipment status.</p>
+    <div class="muted">Total Downtime</div>
+    <h2 style="margin:4px 0;">{{ kpi_total_days }} days</h2>
   </div>
 
-  <div style="height:14px;"></div>
-
-  <div class="grid">
-    {% for d in departments %}
-      <div class="card">
-        <h3 style="margin:0 0 6px 0;">{{ d.name }}</h3>
-        {% if d.description %}<div class="muted">{{ d.description }}</div>{% endif %}
-        <div style="height:12px;"></div>
-        <a class="btn btn-primary" href="{% url 'downtime_tracker:department_detail' d.code %}">View equipment</a>
-      </div>
-    {% empty %}
-      <div class="card">No active departments yet.</div>
-    {% endfor %}
+  <div class="card">
+    <div class="muted">Events</div>
+    <h2 style="margin:4px 0;">{{ kpi_event_count }}</h2>
   </div>
+
+  <div class="card">
+    <div class="muted">MTTR</div>
+    <h2 style="margin:4px 0;">{{ kpi_mttr }} hrs</h2>
+  </div>
+
+  <div class="card">
+    <div class="muted">MTBF</div>
+    <h2 style="margin:4px 0;">{{ kpi_mtbf }} hrs</h2>
+  </div>
+</div>
+
+
+<div style="height:18px;"></div>
+
+
+<!-- ================= CHARTS ================= -->
+<div class="grid">
+
+  <!-- Pareto -->
+  <div class="card">
+    <h3 style="margin-top:0;">Downtime by Department (Pareto)</h3>
+    <canvas id="paretoChart" height="160"></canvas>
+  </div>
+
+  <!-- Category breakdown -->
+  <div class="card">
+    <h3 style="margin-top:0;">Planned vs Unplanned</h3>
+    <canvas id="catChart" height="160"></canvas>
+  </div>
+
+</div>
+
+
+<div style="height:22px;"></div>
+
+
+<!-- ================= DEPARTMENTS ================= -->
+<div class="card">
+  <h2 style="margin-top:0;">Departments</h2>
+  <p class="muted">Select a department to view equipment status.</p>
+</div>
+
+<div style="height:14px;"></div>
+
+<div class="grid">
+  {% for d in departments %}
+    <div class="card">
+      <h3 style="margin:0 0 6px 0;">{{ d.name }}</h3>
+      {% if d.description %}
+        <div class="muted">{{ d.description }}</div>
+      {% endif %}
+
+      <div style="height:12px;"></div>
+
+      <a class="btn btn-primary"
+         href="{% url 'downtime_tracker:department_detail' d.code %}">
+         View equipment
+      </a>
+    </div>
+  {% empty %}
+    <div class="card">No active departments yet.</div>
+  {% endfor %}
+</div>
+
+
+<!-- ================= CHART JS ================= -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+/* Pareto */
+const paretoLabels = {{ pareto_labels_json|safe }};
+const paretoValues = {{ pareto_values_json|safe }};
+
+new Chart(document.getElementById('paretoChart'), {
+  type: 'bar',
+  data: {
+    labels: paretoLabels,
+    datasets: [{
+      label: 'Downtime (days)',
+      data: paretoValues
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: true } },
+    scales: { y: { beginAtZero: true } }
+  }
+});
+
+
+/* Planned vs Unplanned */
+const catLabels = {{ cat_labels_json|safe }};
+const catValues = {{ cat_values_json|safe }};
+
+new Chart(document.getElementById('catChart'), {
+  type: 'pie',
+  data: {
+    labels: catLabels,
+    datasets: [{
+      data: catValues
+    }]
+  },
+  options: {
+    responsive: true
+  }
+});
+</script>
+
 {% endblock %}
