@@ -60,7 +60,6 @@ def _safe_div(n, d, default=0.0):
 
 
 def _window_seconds(year_start, year_end, now_ts):
-    # if this year is current year, you may have a partial window; we still use the requested year window
     end = min(year_end, now_ts)
     start = year_start
     if end <= start:
@@ -75,44 +74,133 @@ def _events_overlapping_window(*, base_qs, year_start, year_end):
     )
 
 
-def _mtbf_mttr_for_equipment(*, events, year_start, year_end, now_ts):
-    """
-    MTTR: total downtime / number of downtime events (in window)
-    MTBF: uptime / number of downtime events (in window)
-          where uptime = window_seconds - downtime_seconds
-    Notes:
-      - We count each downtime event as a "failure event" for MTBF purposes.
-      - If you want MTBF to only count UNPLANNED, apply category filtering in the calling queryset.
-    """
-    win_sec = _window_seconds(year_start, year_end, now_ts)
-    if win_sec <= 0:
-        return 0.0, 0.0, 0.0, 0  # mtbf_days, mttr_days, downtime_days, event_count
-
-    downtime_sec = 0.0
-    event_count = 0
-
-    for ev in events:
-        downtime_sec += _overlap_seconds(ev, year_start, year_end, now_ts)
-        event_count += 1
-
-    uptime_sec = max(0.0, win_sec - downtime_sec)
-
-    mttr_days = _safe_div(downtime_sec, event_count, default=0.0) / 86400.0
-    mtbf_days = _safe_div(uptime_sec, event_count, default=0.0) / 86400.0
-    downtime_days = downtime_sec / 86400.0
-
-    return round(mtbf_days, 3), round(mttr_days, 3), round(downtime_days, 3), event_count
-
-
 # -----------------------------
-# Existing Views (kept)
+# HOME = Plant Dashboard
 # -----------------------------
 @login_required
 def home(request):
+    """
+    Plant Dashboard (uses home.html you updated).
+
+    KPIs:
+      - Total downtime days
+      - Event count
+      - MTTR (hrs)
+      - MTBF (hrs)
+
+    Charts:
+      - Pareto: downtime days by department (bar)
+      - Planned vs Unplanned (pie) for the selected year (ignores cat filter so pie always shows plant mix)
+        NOTE: If you want it to respect cat filter, we can change it easily.
+    """
+    year, year_start, year_end = _year_window_from_request(request)
+    cat, cat_filter = _cat_from_request(request)
+    now_ts = timezone.now()
+
+    # Departments for the cards section (kept)
     departments = Department.objects.filter(is_active=True).order_by("name")
-    return render(request, "downtime_tracker/home.html", {"departments": departments})
+
+    # Base events in year window (plant-wide)
+    events_qs = DowntimeEvent.objects.filter(
+        equipment__is_active=True,
+        equipment__department__is_active=True,
+    )
+    events_qs = _events_overlapping_window(base_qs=events_qs, year_start=year_start, year_end=year_end)
+
+    # Apply category filter to KPIs/Pareto if user chooses (cat != ALL)
+    kpi_events_qs = events_qs
+    if cat_filter:
+        kpi_events_qs = kpi_events_qs.filter(category=cat_filter)
+
+    # KPI totals
+    total_downtime_sec = 0.0
+    event_count = 0
+
+    for ev in kpi_events_qs:
+        total_downtime_sec += _overlap_seconds(ev, year_start, year_end, now_ts)
+        event_count += 1
+
+    total_days = round(total_downtime_sec / 86400.0, 3)
+
+    win_sec = _window_seconds(year_start, year_end, now_ts)
+    uptime_sec = max(0.0, win_sec - total_downtime_sec)
+
+    # Treat each downtime event as a failure for MTBF/MTTR
+    mttr_hours = round(_safe_div(total_downtime_sec, event_count, default=0.0) / 3600.0, 2)
+    mtbf_hours = round(_safe_div(uptime_sec, event_count, default=0.0) / 3600.0, 2)
+
+    # -----------------
+    # Pareto = downtime by department (days)
+    # -----------------
+    dept_seconds = {}  # dept_id -> sec
+
+    # Use same filtered set as KPI so Pareto matches selected cat
+    for ev in kpi_events_qs.select_related("equipment__department"):
+        dept_id = ev.equipment.department_id
+        dept_seconds[dept_id] = dept_seconds.get(dept_id, 0.0) + _overlap_seconds(ev, year_start, year_end, now_ts)
+
+    dept_rows = []
+    for d in departments:
+        sec = dept_seconds.get(d.id, 0.0)
+        dept_rows.append((d.name, round(sec / 86400.0, 3)))
+
+    dept_rows.sort(key=lambda x: x[1], reverse=True)
+
+    pareto_labels = [name for name, _ in dept_rows if _ > 0]
+    pareto_values = [days for _, days in dept_rows if days > 0]
+
+    # -----------------
+    # Planned vs Unplanned pie (plant mix)
+    # - If you want pie to respect cat_filter, change events_qs -> kpi_events_qs here.
+    # -----------------
+    sec_planned = 0.0
+    sec_unplanned = 0.0
+
+    for ev in events_qs:
+        sec = _overlap_seconds(ev, year_start, year_end, now_ts)
+        if ev.category == DowntimeEvent.Category.PLANNED:
+            sec_planned += sec
+        else:
+            sec_unplanned += sec
+
+    cat_labels = [
+        DowntimeEvent.Category.PLANNED.label,
+        DowntimeEvent.Category.UNPLANNED.label,
+    ]
+    cat_values = [
+        round(sec_planned / 86400.0, 3),
+        round(sec_unplanned / 86400.0, 3),
+    ]
+
+    return render(
+        request,
+        "downtime_tracker/home.html",
+        {
+            "departments": departments,
+
+            # Optional: show filters later if you add them to home.html
+            "year": year,
+            "cat": cat,
+            "cat_choices": DowntimeEvent.Category.choices,
+
+            # KPIs expected by your new home.html
+            "kpi_total_days": total_days,
+            "kpi_event_count": event_count,
+            "kpi_mttr": mttr_hours,
+            "kpi_mtbf": mtbf_hours,
+
+            # Charts expected by your new home.html
+            "pareto_labels_json": json.dumps(pareto_labels),
+            "pareto_values_json": json.dumps(pareto_values),
+            "cat_labels_json": json.dumps(cat_labels),
+            "cat_values_json": json.dumps(cat_values),
+        },
+    )
 
 
+# -----------------------------
+# Department page
+# -----------------------------
 @login_required
 def department_detail(request, code: str):
     department = get_object_or_404(Department, code=code, is_active=True)
@@ -122,11 +210,9 @@ def department_detail(request, code: str):
         .order_by("asset_number")
     )
 
-    # Filters
     year, year_start, year_end = _year_window_from_request(request)
     cat, cat_filter = _cat_from_request(request)
 
-    # Open downtime events (for "Down reason" column)
     open_events_qs = DowntimeEvent.objects.filter(
         equipment__department=department,
         equipment__is_active=True,
@@ -138,7 +224,6 @@ def department_detail(request, code: str):
 
     open_event_by_equipment_id = {ev.equipment_id: ev for ev in open_events_qs}
 
-    # Events overlapping the year window (for chart)
     events = DowntimeEvent.objects.filter(
         equipment__department=department,
         equipment__is_active=True,
@@ -331,7 +416,6 @@ def equipment_detail(request, pk: int):
     cat, cat_filter = _cat_from_request(request)
     now_ts = timezone.now()
 
-    # table (all-time) - apply cat filter if set
     events_all_qs = DowntimeEvent.objects.filter(equipment=equipment).order_by("-started_at")
     if cat_filter:
         events_all_qs = events_all_qs.filter(category=cat_filter)
@@ -343,20 +427,17 @@ def equipment_detail(request, pk: int):
         .first()
     )
 
-    # events in selected year window (respect category filter for totals)
     events_year_qs = DowntimeEvent.objects.filter(equipment=equipment)
     events_year_qs = _events_overlapping_window(base_qs=events_year_qs, year_start=year_start, year_end=year_end)
     if cat_filter:
         events_year_qs = events_year_qs.filter(category=cat_filter)
     events_year = events_year_qs.order_by("-started_at")
 
-    # total downtime for current filter
     total_seconds_year = 0.0
     for ev in events_year:
         total_seconds_year += _overlap_seconds(ev, year_start, year_end, now_ts)
     total_days_year = round(total_seconds_year / 86400.0, 3)
 
-    # category split chart ONLY when cat == ALL (no filter)
     chart_labels_json = "null"
     chart_values_json = "null"
     if cat == "ALL":
@@ -409,7 +490,6 @@ def equipment_detail(request, pk: int):
 def change_status(request, pk: int):
     equipment = get_object_or_404(Equipment, pk=pk, is_active=True)
 
-    # Where to return after change (defaults to the equipment's department page)
     next_url = request.GET.get("next") or request.POST.get("next") or ""
 
     if request.method == "POST":
@@ -444,135 +524,3 @@ def change_status(request, pk: int):
         "downtime_tracker/change_status.html",
         {"equipment": equipment, "form": form, "next": next_url},
     )
-
-
-# -----------------------------
-# NEW: Plant Dashboard + Pareto + MTBF/MTTR
-# -----------------------------
-@login_required
-def plant_dashboard(request):
-    """
-    Plant-level dashboard for the selected year/category:
-      - Total downtime (days)
-      - Availability (based on downtime vs window)
-      - Pareto by equipment (downtime days and cumulative %)
-      - MTBF/MTTR overall (treat each downtime event as a failure)
-      - Department rollups
-    """
-    year, year_start, year_end = _year_window_from_request(request)
-    cat, cat_filter = _cat_from_request(request)
-    now_ts = timezone.now()
-
-    # active equipment universe
-    equipment_qs = Equipment.objects.filter(is_active=True, department__is_active=True).select_related("department")
-
-    # events overlapping year window
-    events_qs = DowntimeEvent.objects.filter(equipment__is_active=True, equipment__department__is_active=True)
-    events_qs = _events_overlapping_window(base_qs=events_qs, year_start=year_start, year_end=year_end)
-    if cat_filter:
-        events_qs = events_qs.filter(category=cat_filter)
-    events_qs = events_qs.select_related("equipment", "equipment__department")
-
-    # totals per equipment (downtime seconds) and event counts
-    downtime_seconds_by_eq = {e.id: 0.0 for e in equipment_qs}
-    event_count_by_eq = {e.id: 0 for e in equipment_qs}
-
-    for ev in events_qs:
-        downtime_seconds_by_eq[ev.equipment_id] = downtime_seconds_by_eq.get(ev.equipment_id, 0.0) + _overlap_seconds(
-            ev, year_start, year_end, now_ts
-        )
-        event_count_by_eq[ev.equipment_id] = event_count_by_eq.get(ev.equipment_id, 0) + 1
-
-    # overall KPIs
-    total_downtime_sec = sum(downtime_seconds_by_eq.values())
-    total_downtime_days = round(total_downtime_sec / 86400.0, 3)
-
-    win_sec = _window_seconds(year_start, year_end, now_ts)
-    # Availability here is simplistic: 1 - (downtime / window)
-    availability = 0.0
-    if win_sec > 0:
-        availability = max(0.0, 1.0 - (total_downtime_sec / win_sec))
-    availability_pct = round(availability * 100.0, 2)
-
-    # overall MTBF / MTTR (treat each downtime event as a failure)
-    total_event_count = sum(event_count_by_eq.values())
-    overall_mttr_days = round(_safe_div(total_downtime_sec, total_event_count, default=0.0) / 86400.0, 3)
-    overall_mtbf_days = round(_safe_div(max(0.0, win_sec - total_downtime_sec), total_event_count, default=0.0) / 86400.0, 3)
-
-    # department rollups
-    dept_rows = []
-    dept_seconds = {}
-    dept_events = {}
-
-    for eq in equipment_qs:
-        dept_id = eq.department_id
-        dept_seconds[dept_id] = dept_seconds.get(dept_id, 0.0) + downtime_seconds_by_eq.get(eq.id, 0.0)
-        dept_events[dept_id] = dept_events.get(dept_id, 0) + event_count_by_eq.get(eq.id, 0)
-
-    departments = Department.objects.filter(is_active=True).order_by("name")
-    for d in departments:
-        sec = dept_seconds.get(d.id, 0.0)
-        evc = dept_events.get(d.id, 0)
-        dept_rows.append({
-            "name": d.name,
-            "code": d.code,
-            "downtime_days": round(sec / 86400.0, 3),
-            "event_count": evc,
-        })
-
-    dept_rows.sort(key=lambda r: r["downtime_days"], reverse=True)
-
-    # Pareto by equipment (downtime days)
-    pareto_items = []
-    for eq in equipment_qs:
-        sec = downtime_seconds_by_eq.get(eq.id, 0.0)
-        if sec <= 0:
-            continue
-        pareto_items.append({
-            "equipment_id": eq.id,
-            "asset_number": eq.asset_number,
-            "description": eq.description,
-            "department": eq.department.name,
-            "downtime_days": round(sec / 86400.0, 3),
-            "event_count": event_count_by_eq.get(eq.id, 0),
-        })
-
-    pareto_items.sort(key=lambda r: r["downtime_days"], reverse=True)
-
-    # build Pareto chart arrays (top N)
-    top_n = 10
-    pareto_top = pareto_items[:top_n]
-
-    total_top = sum([x["downtime_days"] for x in pareto_top]) or 0.0
-    total_all = sum([x["downtime_days"] for x in pareto_items]) or 0.0
-
-    pareto_labels = [x["asset_number"] for x in pareto_top]
-    pareto_values = [x["downtime_days"] for x in pareto_top]
-
-    cum = 0.0
-    pareto_cum_pct = []
-    denom = total_all if total_all > 0 else 1.0
-    for v in pareto_values:
-        cum += v
-        pareto_cum_pct.append(round((cum / denom) * 100.0, 2))
-
-    context = {
-        "year": year,
-        "cat": cat,
-        "cat_choices": DowntimeEvent.Category.choices,
-
-        "total_downtime_days": total_downtime_days,
-        "availability_pct": availability_pct,
-        "overall_mtbf_days": overall_mtbf_days,
-        "overall_mttr_days": overall_mttr_days,
-        "total_event_count": total_event_count,
-
-        "dept_rows": dept_rows,
-        "pareto_items": pareto_items[:50],  # show a table up to 50 in UI if desired
-
-        "pareto_labels_json": json.dumps(pareto_labels),
-        "pareto_values_json": json.dumps(pareto_values),
-        "pareto_cum_pct_json": json.dumps(pareto_cum_pct),
-    }
-
-    return render(request, "downtime_tracker/plant_dashboard.html", context)
