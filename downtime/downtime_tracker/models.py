@@ -238,6 +238,7 @@ class DowntimeEvent(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        related_name="started_downtime_event",
     )
 
     ended_by_log = models.OneToOneField(
@@ -245,6 +246,7 @@ class DowntimeEvent(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
+        related_name="ended_downtime_event",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
