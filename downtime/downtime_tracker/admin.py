@@ -1,6 +1,6 @@
 from __future__ import annotations
+
 from django.contrib import admin, messages
-from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 from .models import Department, Equipment, StatusChangeLog, DowntimeEvent
@@ -21,18 +21,26 @@ class DowntimeEventInline(admin.TabularInline):
     can_delete = False
     show_change_link = True
     ordering = ("-started_at",)
-    fields = ("started_at", "ended_at", "duration_display", "start_comment", "end_comment", "created_by", "closed_by")
+
+    fields = (
+        "category",
+        "started_at",
+        "ended_at",
+        "duration_display",
+        "start_comment",
+        "end_comment",
+        "created_by",
+        "closed_by",
+    )
     readonly_fields = ("duration_display", "created_by", "closed_by")
 
+    @admin.display(description="Duration")
     def duration_display(self, obj: DowntimeEvent) -> str:
-        # Avoid formatting surprises; this works even for open events.
         seconds = int(obj.duration.total_seconds())
         days = seconds // 86400
         hours = (seconds % 86400) // 3600
         minutes = (seconds % 3600) // 60
         return f"{days}d {hours:02d}h {minutes:02d}m"
-
-    duration_display.short_description = "Duration"
 
 
 class StatusChangeLogInline(admin.TabularInline):
@@ -67,12 +75,10 @@ class EquipmentAdmin(admin.ModelAdmin):
     )
 
     readonly_fields = ("status_updated_at",)
-
     actions = ("mark_up", "mark_down")
 
     @admin.display(description="Status")
     def status_badge(self, obj: Equipment) -> str:
-        # Admin list display is plain text; you can add HTML later if desired.
         return "DOWN" if obj.status == Equipment.Status.DOWN else "UP"
 
     @admin.display(description="Open event since")
@@ -88,7 +94,6 @@ class EquipmentAdmin(admin.ModelAdmin):
         if change:
             old = Equipment.objects.get(pk=obj.pk)
             if old.status != obj.status:
-                # Revert the status change and instruct to use actions (which enforce comments).
                 obj.status = old.status
                 messages.error(
                     request,
@@ -98,11 +103,7 @@ class EquipmentAdmin(admin.ModelAdmin):
 
     def _bulk_change_status(self, request, queryset, new_status: str):
         """
-        Admin actions for bulk status changes.
-        We require a comment, but Django admin actions don't provide a built-in prompt.
-        Production approach: block bulk status changes and force single-equipment change,
-        OR implement a custom admin action form.
-        For safety and auditability, we block bulk and allow only one at a time.
+        For auditability, we block bulk and allow only one equipment item at a time.
         """
         count = queryset.count()
         if count != 1:
@@ -110,11 +111,23 @@ class EquipmentAdmin(admin.ModelAdmin):
             return
 
         eq: Equipment = queryset.first()
-        # Minimal comment capture: use a timestamped default and instruct user to use the main UI later.
-        # If you prefer strict: raise and block here until we add custom form.
-        comment = f"Admin action by {request.user.username} at {timezone.now():%Y-%m-%d %H:%M} (temporary default comment)"
+        comment = (
+            f"Admin action by {request.user.username} at "
+            f"{timezone.now():%Y-%m-%d %H:%M} (temporary default comment)"
+        )
+
         try:
-            eq.set_status(new_status=new_status, comment=comment, user=request.user)
+            if new_status == Equipment.Status.DOWN:
+                # Default category for admin action:
+                eq.set_status(
+                    new_status=new_status,
+                    comment=comment,
+                    user=request.user,
+                    downtime_category=DowntimeEvent.Category.UNPLANNED,
+                )
+            else:
+                eq.set_status(new_status=new_status, comment=comment, user=request.user)
+
             messages.success(request, f"{eq.asset_number} set to {new_status}.")
         except Exception as exc:
             messages.error(request, f"Failed to change status: {exc}")
@@ -132,6 +145,7 @@ class EquipmentAdmin(admin.ModelAdmin):
 class DowntimeEventAdmin(admin.ModelAdmin):
     list_display = (
         "equipment",
+        "category",
         "started_at",
         "ended_at",
         "is_open",
@@ -139,7 +153,11 @@ class DowntimeEventAdmin(admin.ModelAdmin):
         "created_by",
         "closed_by",
     )
-    list_filter = ("equipment__department", "ended_at")
+    list_filter = (
+        "category",
+        "equipment__department",
+        "ended_at",
+    )
     search_fields = ("equipment__asset_number", "equipment__description", "start_comment", "end_comment")
     ordering = ("-started_at",)
     list_select_related = ("equipment", "equipment__department", "created_by", "closed_by")
@@ -155,10 +173,22 @@ class DowntimeEventAdmin(admin.ModelAdmin):
     )
 
     fieldsets = (
-        ("Equipment", {"fields": ("equipment",)}),
+        ("Equipment", {"fields": ("equipment", "category")}),
         ("Timing", {"fields": ("started_at", "ended_at", "duration_display")}),
         ("Comments", {"fields": ("start_comment", "end_comment")}),
-        ("Audit", {"fields": ("created_by", "closed_by", "started_by_log", "ended_by_log", "created_at", "updated_at")}),
+        (
+            "Audit",
+            {
+                "fields": (
+                    "created_by",
+                    "closed_by",
+                    "started_by_log",
+                    "ended_by_log",
+                    "created_at",
+                    "updated_at",
+                )
+            },
+        ),
     )
 
     @admin.display(boolean=True, description="Open?")
