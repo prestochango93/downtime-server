@@ -7,12 +7,22 @@
       <div>
         <h2 style="margin-top:0;">{{ equipment.asset_number }}</h2>
         <div><strong>{{ equipment.description }}</strong></div>
-        <div class="muted">Department: <a href="{% url 'downtime_tracker:department_detail' equipment.department.code %}">{{ equipment.department.name }}</a></div>
-        {% if equipment.location %}<div class="muted">Location: {{ equipment.location }}</div>{% endif %}
+
+        <div class="muted">
+          Department:
+          <a href="{% url 'downtime_tracker:department_detail' equipment.department.code %}?year={{ year }}&cat={{ cat }}">
+            {{ equipment.department.name }}
+          </a>
+        </div>
+
+        {% if equipment.location %}
+          <div class="muted">Location: {{ equipment.location }}</div>
+        {% endif %}
       </div>
 
       <div style="text-align:right;">
         <div class="muted">Current Status</div>
+
         {% if equipment.status == "UP" %}
           <span class="status-pill up">UP</span>
         {% else %}
@@ -22,8 +32,15 @@
         <div style="height:10px;"></div>
 
         {% if perms.downtime_tracker.change_equipment %}
-          <a class="btn btn-primary" href="{% url 'downtime_tracker:change_status' equipment.id %}">Change Status</a>
-          <a class="btn" href="{% url 'downtime_tracker:equipment_export_csv' equipment.id %}?year={{ year }}">Export CSV</a>
+          <a class="btn btn-primary"
+             href="{% url 'downtime_tracker:change_status' equipment.id %}?next={{ request.get_full_path|urlencode }}">
+             Change Status
+          </a>
+
+          <a class="btn"
+             href="{% url 'downtime_tracker:equipment_export_csv' equipment.id %}?year={{ year }}&cat={{ cat }}">
+             Export CSV
+          </a>
         {% endif %}
       </div>
     </div>
@@ -32,6 +49,7 @@
       <div style="height:12px;"></div>
       <div class="card" style="background:#fff7ed; border:1px solid #fed7aa;">
         <div><strong>Down reason:</strong> {{ open_event.start_comment }}</div>
+        <div><strong>Category:</strong> {{ open_event.get_category_display }}</div>
         <div class="muted">Down since: {{ open_event.started_at }}</div>
       </div>
     {% endif %}
@@ -41,16 +59,36 @@
 
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-      <h3 style="margin:0;">Downtime Summary</h3>
+      <h3 style="margin:0;">
+        Downtime Summary
+        {% if cat != "ALL" %}
+          — {{ cat }}
+        {% endif %}
+      </h3>
 
-      <form method="get" style="display:flex; gap:8px; align-items:center;">
-        <label for="year" style="margin:0;">Year</label>
-        <select name="year" id="year" onchange="this.form.submit()">
-          {% for y in years %}
-            <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
-          {% endfor %}
-        </select>
-        <noscript><button class="btn" type="submit">Apply</button></noscript>
+      <form method="get" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+        <div>
+          <label for="year">Year</label><br>
+          <select name="year" id="year">
+            {% for y in years %}
+              <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label for="cat">Downtime Type</label><br>
+          <select name="cat" id="cat">
+            <option value="ALL" {% if cat == "ALL" %}selected{% endif %}>All</option>
+            {% for v,l in cat_choices %}
+              <option value="{{ v }}" {% if cat == v %}selected{% endif %}>{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <button class="btn" type="submit">Apply</button>
+        </div>
       </form>
     </div>
 
@@ -61,13 +99,20 @@
   <div style="height:14px;"></div>
 
   <div class="card">
-    <h3 style="margin-top:0;">Downtime Events (All)</h3>
+    <h3 style="margin-top:0;">
+      Downtime Events
+      {% if cat != "ALL" %}
+        — {{ cat }}
+      {% endif %}
+    </h3>
+
     <table class="table">
       <thead>
         <tr>
           <th>Start</th>
           <th>End</th>
           <th>Duration (days)</th>
+          <th>Type</th>
           <th>Start comment</th>
           <th>End comment</th>
         </tr>
@@ -76,15 +121,29 @@
         {% for ev in events_all %}
           <tr>
             <td>{{ ev.started_at }}</td>
-            <td>{% if ev.ended_at %}{{ ev.ended_at }}{% else %}<span class="status-pill down">OPEN</span>{% endif %}</td>
+
+            <td>
+              {% if ev.ended_at %}
+                {{ ev.ended_at }}
+              {% else %}
+                <span class="status-pill down">OPEN</span>
+              {% endif %}
+            </td>
+
             <td>{{ ev.duration_days|floatformat:3 }}</td>
+            <td>{{ ev.get_category_display }}</td>
             <td>{{ ev.start_comment|default:"—" }}</td>
             <td>{{ ev.end_comment|default:"—" }}</td>
           </tr>
         {% empty %}
-          <tr><td colspan="5" class="muted">No downtime events recorded for this equipment.</td></tr>
+          <tr>
+            <td colspan="6" class="muted">
+              No downtime events recorded for this equipment.
+            </td>
+          </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+
 {% endblock %}
