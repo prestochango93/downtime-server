@@ -4,14 +4,12 @@ from . import views
 app_name = "downtime_tracker"
 
 urlpatterns = [
-    # Home IS the plant dashboard
     path("", views.home, name="home"),
 
-    # Alias so any old templates linking to plant_dashboard stop crashing
+    # Alias route (fixes NoReverseMatch if anything still points to plant_dashboard)
     path("dashboard/", views.home, name="plant_dashboard"),
 
     path("dept/<slug:code>/", views.department_detail, name="department_detail"),
-
     path("equipment/<int:pk>/", views.equipment_detail, name="equipment_detail"),
     path("equipment/<int:pk>/status/", views.change_status, name="change_status"),
 
