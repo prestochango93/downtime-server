@@ -74,24 +74,37 @@ def _events_overlapping_window(*, base_qs, year_start, year_end):
     )
 
 
+def _humanize_timedelta(td):
+    """
+    Returns a short human-readable duration like:
+    '2d 3h', '5h 12m', '9m'
+    """
+    total_seconds = int(td.total_seconds())
+    if total_seconds < 0:
+        total_seconds = 0
+
+    minutes = total_seconds // 60
+    hours = minutes // 60
+    days = hours // 24
+
+    if days > 0:
+        return f"{days}d {hours % 24}h"
+    if hours > 0:
+        return f"{hours}h {minutes % 60}m"
+    return f"{minutes}m"
+
+
 # -----------------------------
 # HOME = Plant Dashboard
 # -----------------------------
 @login_required
 def home(request):
     """
-    Plant Dashboard (uses home.html you updated).
+    Plant Dashboard (home.html)
 
-    KPIs:
-      - Total downtime days
-      - Event count
-      - MTTR (hrs)
-      - MTBF (hrs)
-
-    Charts:
-      - Pareto: downtime days by department (bar)
-      - Planned vs Unplanned (pie) for the selected year (ignores cat filter so pie always shows plant mix)
-        NOTE: If you want it to respect cat filter, we can change it easily.
+    Adds:
+      - "Currently Down" section grouped by department:
+        asset, description, reason (start_comment), down_since, down_for
     """
     year, year_start, year_end = _year_window_from_request(request)
     cat, cat_filter = _cat_from_request(request)
@@ -99,6 +112,59 @@ def home(request):
 
     # Departments for the cards section (kept)
     departments = Department.objects.filter(is_active=True).order_by("name")
+
+    # =============================
+    # NEW: Currently Down (OPEN events)
+    # =============================
+    open_events_qs = (
+        DowntimeEvent.objects.filter(
+            ended_at__isnull=True,
+            equipment__is_active=True,
+            equipment__department__is_active=True,
+        )
+        .select_related("equipment", "equipment__department")
+        .order_by("equipment__department__name", "-started_at")
+    )
+
+    # If you want this list to respect the dashboard category filter, keep this.
+    if cat_filter:
+        open_events_qs = open_events_qs.filter(category=cat_filter)
+
+    down_by_department = []
+    down_total_count = 0
+
+    current_dept_id = None
+    current_bucket = None
+
+    for ev in open_events_qs:
+        down_total_count += 1
+        dept = ev.equipment.department
+
+        if current_dept_id != dept.id:
+            current_dept_id = dept.id
+            current_bucket = {
+                "department_name": dept.name,
+                "department_code": dept.code,
+                "items": [],
+            }
+            down_by_department.append(current_bucket)
+
+        current_bucket["items"].append(
+            {
+                "equipment_id": ev.equipment_id,
+                "asset_number": ev.equipment.asset_number,
+                "description": ev.equipment.description,
+                "category_label": ev.get_category_display(),
+                "reason": ev.start_comment,
+                "down_since": ev.started_at,
+                "down_for": _humanize_timedelta(now_ts - ev.started_at),
+                "down_for_hours": round((now_ts - ev.started_at).total_seconds() / 3600.0, 2),
+            }
+        )
+
+    # =============================
+    # Existing dashboard calculations
+    # =============================
 
     # Base events in year window (plant-wide)
     events_qs = DowntimeEvent.objects.filter(
@@ -129,15 +195,13 @@ def home(request):
     mttr_hours = round(_safe_div(total_downtime_sec, event_count, default=0.0) / 3600.0, 2)
     mtbf_hours = round(_safe_div(uptime_sec, event_count, default=0.0) / 3600.0, 2)
 
-    # -----------------
     # Pareto = downtime by department (days)
-    # -----------------
     dept_seconds = {}  # dept_id -> sec
-
-    # Use same filtered set as KPI so Pareto matches selected cat
     for ev in kpi_events_qs.select_related("equipment__department"):
         dept_id = ev.equipment.department_id
-        dept_seconds[dept_id] = dept_seconds.get(dept_id, 0.0) + _overlap_seconds(ev, year_start, year_end, now_ts)
+        dept_seconds[dept_id] = dept_seconds.get(dept_id, 0.0) + _overlap_seconds(
+            ev, year_start, year_end, now_ts
+        )
 
     dept_rows = []
     for d in departments:
@@ -146,13 +210,10 @@ def home(request):
 
     dept_rows.sort(key=lambda x: x[1], reverse=True)
 
-    pareto_labels = [name for name, _ in dept_rows if _ > 0]
+    pareto_labels = [name for name, days in dept_rows if days > 0]
     pareto_values = [days for _, days in dept_rows if days > 0]
 
-    # -----------------
     # Planned vs Unplanned pie (plant mix)
-    # - If you want pie to respect cat_filter, change events_qs -> kpi_events_qs here.
-    # -----------------
     sec_planned = 0.0
     sec_unplanned = 0.0
 
@@ -177,19 +238,21 @@ def home(request):
         "downtime_tracker/home.html",
         {
             "departments": departments,
-
-            # Optional: show filters later if you add them to home.html
             "year": year,
             "cat": cat,
             "cat_choices": DowntimeEvent.Category.choices,
 
-            # KPIs expected by your new home.html
+            # NEW: Currently Down
+            "down_by_department": down_by_department,
+            "down_total_count": down_total_count,
+
+            # KPIs
             "kpi_total_days": total_days,
             "kpi_event_count": event_count,
             "kpi_mttr": mttr_hours,
             "kpi_mtbf": mtbf_hours,
 
-            # Charts expected by your new home.html
+            # Charts
             "pareto_labels_json": json.dumps(pareto_labels),
             "pareto_values_json": json.dumps(pareto_values),
             "cat_labels_json": json.dumps(cat_labels),
@@ -213,6 +276,7 @@ def department_detail(request, code: str):
     year, year_start, year_end = _year_window_from_request(request)
     cat, cat_filter = _cat_from_request(request)
 
+    # Open downtime events (for "Down reason" column)
     open_events_qs = DowntimeEvent.objects.filter(
         equipment__department=department,
         equipment__is_active=True,
@@ -224,6 +288,7 @@ def department_detail(request, code: str):
 
     open_event_by_equipment_id = {ev.equipment_id: ev for ev in open_events_qs}
 
+    # Events overlapping the year window (for chart)
     events = DowntimeEvent.objects.filter(
         equipment__department=department,
         equipment__is_active=True,
