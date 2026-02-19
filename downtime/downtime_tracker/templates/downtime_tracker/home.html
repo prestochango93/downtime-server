@@ -3,6 +3,105 @@
 
 {% block content %}
 
+<style>
+  /* Clean truncation for long reason text */
+  .truncate {
+    max-width: 520px;     /* tweak as you like */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+  }
+  .pill {
+    display:inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 12px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #111827;
+  }
+</style>
+
+<!-- ================= CURRENTLY DOWN ================= -->
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+    <div>
+      <h2 style="margin-top:0;">Currently Down</h2>
+      <div class="muted">
+        Open events: <strong>{{ down_total_count }}</strong>
+        {% if cat != "ALL" %}
+          · Filter: <strong>{{ cat }}</strong>
+        {% else %}
+          · Filter: <strong>ALL</strong>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="muted" style="text-align:right;">
+      Tip: click an asset to open its detail page.
+    </div>
+  </div>
+
+  <div style="height:12px;"></div>
+
+  {% if down_total_count == 0 %}
+    <div class="muted">Nothing is currently down 🎉</div>
+  {% else %}
+    {% for bucket in down_by_department %}
+      <div style="margin-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+          <h3 style="margin:0;">
+            {{ bucket.department_name }}
+          </h3>
+          <a class="btn"
+             href="{% url 'downtime_tracker:department_detail' bucket.department_code %}?year={{ year }}&cat={{ cat }}">
+            View department
+          </a>
+        </div>
+
+        <div style="height:8px;"></div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:120px;">Asset</th>
+              <th>Description</th>
+              <th style="width:170px;">Type</th>
+              <th>Reason</th>
+              <th style="width:170px;">Down Since</th>
+              <th style="width:110px;">Down For</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in bucket.items %}
+              <tr>
+                <td>
+                  <a href="{% url 'downtime_tracker:equipment_detail' row.equipment_id %}?year={{ year }}&cat={{ cat }}">
+                    {{ row.asset_number }}
+                  </a>
+                </td>
+                <td>{{ row.description }}</td>
+                <td><span class="pill">{{ row.category_label }}</span></td>
+                <td>
+                  <span class="truncate" title="{{ row.reason }}">
+                    {{ row.reason|truncatechars:120 }}
+                  </span>
+                </td>
+                <td>{{ row.down_since|date:"Y-m-d H:i" }}</td>
+                <td><strong>{{ row.down_for }}</strong></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+
+<div style="height:18px;"></div>
+
 <!-- ================= HEADER / FILTERS ================= -->
 <div class="card">
   <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
@@ -39,84 +138,6 @@
       </div>
     </form>
   </div>
-</div>
-
-<div style="height:18px;"></div>
-
-<!-- ================= CURRENTLY DOWN ================= -->
-<div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
-    <div>
-      <h2 style="margin:0;">Currently Down</h2>
-      <div class="muted" style="margin-top:4px;">
-        Open downtime events right now
-        {% if cat != "ALL" %}
-          · Filtered to: <strong>{{ cat }}</strong>
-        {% endif %}
-      </div>
-    </div>
-    <div class="muted" style="font-weight:700;">
-      Total down: {{ down_total_count }}
-    </div>
-  </div>
-
-  <div style="height:12px;"></div>
-
-  {% if down_total_count == 0 %}
-    <div class="muted">No equipment is currently down.</div>
-  {% else %}
-
-    {% for dept in down_by_department %}
-      <div style="margin-top:14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-          <h3 style="margin:0;">
-            {{ dept.department_name }}
-          </h3>
-          <a class="btn"
-             href="{% url 'downtime_tracker:department_detail' dept.department_code %}?year={{ year }}&cat={{ cat }}">
-             View department
-          </a>
-        </div>
-
-        <div style="height:8px;"></div>
-
-        <table class="table">
-          <thead>
-            <tr>
-              <th style="width:140px;">Asset</th>
-              <th>Description</th>
-              <th style="width:260px;">Reason</th>
-              <th style="width:170px;">Type</th>
-              <th style="width:200px;">Down Since</th>
-              <th style="width:120px;">Down For</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in dept.items %}
-              <tr>
-                <td><strong>{{ row.asset_number }}</strong></td>
-                <td>{{ row.description }}</td>
-
-                <!-- Truncated reason w/ hover tooltip + click-to-expand -->
-                <td>
-                  <span
-                    class="reason-trunc"
-                    title="{{ row.reason|default_if_none:'' }}">
-                    {{ row.reason|default_if_none:'' }}
-                  </span>
-                </td>
-
-                <td>{{ row.category_label }}</td>
-                <td>{{ row.down_since|date:"Y-m-d H:i" }}</td>
-                <td><span class="status-pill down">{{ row.down_for }}</span></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% endfor %}
-
-  {% endif %}
 </div>
 
 <div style="height:18px;"></div>
@@ -195,37 +216,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<style>
-/* Truncate the reason text to keep the table clean */
-.reason-trunc{
-  display:inline-block;
-  max-width: 260px;         /* keep aligned with column width */
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
-  cursor: help;             /* hint that hover shows full text */
-}
-
-/* Optional: click-to-expand (toggles wrapping) */
-.reason-trunc.expanded{
-  max-width: none;
-  white-space: normal;
-  overflow: visible;
-  cursor: pointer;
-}
-</style>
-
 <script>
-/* Click-to-expand reason cells */
-document.addEventListener('click', (e) => {
-  const el = e.target.closest('.reason-trunc');
-  if (!el) return;
-  el.classList.toggle('expanded');
-});
-
-/* Pareto */
 const paretoLabels = {{ pareto_labels_json|safe }};
 const paretoValues = {{ pareto_values_json|safe }};
 
@@ -237,7 +228,6 @@ if (paretoLabels && paretoLabels.length) {
   });
 }
 
-/* Planned vs Unplanned */
 const catLabels = {{ cat_labels_json|safe }};
 const catValues = {{ cat_values_json|safe }};
 
