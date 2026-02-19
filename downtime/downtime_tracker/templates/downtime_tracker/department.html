@@ -3,6 +3,17 @@
 {% block title %}{{ department.name }} — Downtime Tracker{% endblock %}
 
 {% block content %}
+
+<style>
+  .truncate-reason {
+    max-width: 420px;   /* tweak if you want */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+  }
+</style>
+
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
       <div>
@@ -62,19 +73,23 @@
                 <span class="status-pill down">DOWN</span>
               {% endif %}
             </td>
+
             <td>
               {% if e.status == "DOWN" %}
-              {% with ev=open_event_by_equipment_id|get_item:e.id %}
-              {% if ev %}
-              {{ ev.start_comment|truncatechars:80 }}
-              {% else %}
-                <span class="muted">—</span>
-              {% endif %}
-              {% endwith %}
+                {% with ev=open_event_by_equipment_id|get_item:e.id %}
+                  {% if ev %}
+                    <span class="truncate-reason" title="{{ ev.start_comment }}">
+                      {{ ev.start_comment|truncatechars:90 }}
+                    </span>
+                  {% else %}
+                    <span class="muted">—</span>
+                  {% endif %}
+                {% endwith %}
               {% else %}
                 <span class="muted">—</span>
               {% endif %}
             </td>
+
             <td class="right">
               {% if perms.downtime_tracker.change_equipment %}
                 <a class="btn" href="{% url 'downtime_tracker:change_status' e.id %}">Change</a>
@@ -89,31 +104,35 @@
       </tbody>
     </table>
   </div>
-<h3>Downtime (days)</h3>
-<div class="card">
-  <canvas id="downtimeChart" height="110"></canvas>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-  const labels = {{ chart_labels_json|safe }};
-  const values = {{ chart_values_json|safe }};
+  <div style="height:14px;"></div>
 
-  const ctx = document.getElementById('downtimeChart');
-  new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Downtime (days)',
-        data: values
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: { legend: { display: true } },
-      scales: { y: { beginAtZero: true } }
-    }
-  });
-</script>
+  <h3>Downtime (days)</h3>
+  <div class="card">
+    <canvas id="downtimeChart" height="110"></canvas>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const labels = {{ chart_labels_json|safe }};
+    const values = {{ chart_values_json|safe }};
+
+    const ctx = document.getElementById('downtimeChart');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Downtime (days)',
+          data: values
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } }
+      }
+    });
+  </script>
+
 {% endblock %}
