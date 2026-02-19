@@ -2,6 +2,24 @@
 {% block title %}{{ equipment.asset_number }} — Downtime Tracker{% endblock %}
 
 {% block content %}
+
+<style>
+  .truncate {
+    max-width: 520px;     /* tweak */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+  }
+  .truncate-sm {
+    max-width: 360px;     /* tweak */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+  }
+</style>
+
   <div class="card">
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap;">
       <div>
@@ -48,7 +66,12 @@
     {% if equipment.status == "DOWN" and open_event %}
       <div style="height:12px;"></div>
       <div class="card" style="background:#fff7ed; border:1px solid #fed7aa;">
-        <div><strong>Down reason:</strong> {{ open_event.start_comment }}</div>
+        <div>
+          <strong>Down reason:</strong>
+          <span class="truncate" title="{{ open_event.start_comment }}">
+            {{ open_event.start_comment|truncatechars:160 }}
+          </span>
+        </div>
         <div><strong>Category:</strong> {{ open_event.get_category_display }}</div>
         <div class="muted">Down since: {{ open_event.started_at }}</div>
       </div>
@@ -130,8 +153,26 @@
             </td>
             <td>{{ ev.duration_days|floatformat:3 }}</td>
             <td>{{ ev.get_category_display }}</td>
-            <td>{{ ev.start_comment|default:"—" }}</td>
-            <td>{{ ev.end_comment|default:"—" }}</td>
+
+            <td>
+              {% if ev.start_comment %}
+                <span class="truncate-sm" title="{{ ev.start_comment }}">
+                  {{ ev.start_comment|truncatechars:90 }}
+                </span>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+            <td>
+              {% if ev.end_comment %}
+                <span class="truncate-sm" title="{{ ev.end_comment }}">
+                  {{ ev.end_comment|truncatechars:90 }}
+                </span>
+              {% else %}
+                —
+              {% endif %}
+            </td>
           </tr>
         {% empty %}
           <tr>
